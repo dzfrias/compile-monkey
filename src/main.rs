@@ -29,7 +29,7 @@ fn main() -> Result<()> {
                 let bytecode = compiler.compile(program);
                 let mut vm = Vm::new(bytecode);
                 vm.run().context("runtime error")?;
-                if let Some(top) = vm.stack_top() {
+                if let Some(top) = vm.last_popped() {
                     println!("{top}")
                 }
             }

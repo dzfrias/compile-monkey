@@ -29,6 +29,7 @@ pub struct Vm {
     constants: Vec<Object>,
 
     stack: Vec<Object>,
+    last_popped: Option<Object>,
     sp: usize,
 }
 
@@ -39,6 +40,7 @@ impl Vm {
             constants,
             stack: Vec::with_capacity(STACK_SIZE),
             sp: 0,
+            last_popped: None,
         }
     }
 
@@ -56,22 +58,11 @@ impl Vm {
                     self.push(constant.clone())?;
                     ip += 2;
                 }
-                OpCode::Add => {
-                    let right = {
-                        let right = self
-                            .pop()
-                            .expect("bytecode error: right side of add does not exist");
-                        *cast!(right, Int)
-                    };
-                    let left = {
-                        let left = self
-                            .pop()
-                            .expect("bytecode error: left side of add does not exist");
-                        *cast!(left, Int)
-                    };
-
-                    let sum = left + right;
-                    self.push(Object::Int(sum))?;
+                OpCode::Add | OpCode::Sub | OpCode::Div | OpCode::Mul => {
+                    self.execute_binary_op(op)?;
+                }
+                OpCode::Pop => {
+                    self.last_popped = self.pop();
                 }
             }
 
@@ -81,18 +72,42 @@ impl Vm {
         Ok(())
     }
 
-    fn pop(&mut self) -> Option<&Object> {
-        self.sp -= 1;
-        self.stack.get(self.sp)
+    pub fn last_popped(&self) -> Option<&Object> {
+        self.last_popped.as_ref()
+    }
+
+    fn pop(&mut self) -> Option<Object> {
+        self.stack.pop()
     }
 
     fn push(&mut self, obj: Object) -> Result<()> {
         if self.sp == STACK_SIZE {
             return Err(RuntimeError::StackOverflow);
         }
-        // TODO: stack overflow handling
+
         self.stack.push(obj);
-        self.sp += 1;
+
+        Ok(())
+    }
+
+    fn execute_binary_op(&mut self, op: OpCode) -> Result<()> {
+        let right = self
+            .pop()
+            .expect("bytecode error: right side of add does not exist");
+        let right = cast!(right, Int);
+        let left = self
+            .pop()
+            .expect("bytecode error: left side of add does not exist");
+        let left = cast!(left, Int);
+
+        let result = match op {
+            OpCode::Sub => left - right,
+            OpCode::Add => left + right,
+            OpCode::Mul => left * right,
+            OpCode::Div => left / right,
+            op => panic!("should not call with opcode: {op:?}"),
+        };
+        self.push(Object::Int(result))?;
 
         Ok(())
     }
@@ -102,10 +117,6 @@ impl Vm {
             .try_into()
             .expect("should be two bytes long");
         u16::from_be_bytes(bytes)
-    }
-
-    pub fn stack_top(&self) -> Option<&Object> {
-        self.stack.last()
     }
 }
 
@@ -128,7 +139,7 @@ mod tests {
                 let bytecode = compiler.compile(prog);
                 let mut vm = Vm::new(bytecode);
                 vm.run().expect("vm should run with no errors");
-                let stack_top = vm.stack_top().unwrap();
+                let stack_top = vm.last_popped().unwrap();
                 assert_eq!($expect, stack_top);
              )+
         };
@@ -136,6 +147,12 @@ mod tests {
 
     #[test]
     fn can_execute_integer_arithmetic() {
-        vm_test!(["1", &Object::Int(1)], ["1 + 2", &Object::Int(3)]);
+        vm_test!(
+            ["1", &Object::Int(1)],
+            ["1 + 2", &Object::Int(3)],
+            ["1 - 2", &Object::Int(-1)],
+            ["4 / 2", &Object::Int(2)],
+            ["4 * 2", &Object::Int(8)]
+        );
     }
 }

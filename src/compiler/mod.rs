@@ -45,7 +45,10 @@ impl Compiler {
 
     fn compile_stmt(&mut self, stmt: &Stmt) {
         match stmt {
-            Stmt::Expr(expr) => self.compile_expr(expr),
+            Stmt::Expr(expr) => {
+                self.compile_expr(expr);
+                self.emit(OpCode::Pop, vec![]);
+            }
             stmt => todo!("compile stmt for: {stmt}"),
         }
     }
@@ -55,10 +58,14 @@ impl Compiler {
             Expr::Infix { left, op, right } => {
                 self.compile_expr(&left);
                 self.compile_expr(&right);
-                match op {
-                    InfixOp::Plus => self.emit(OpCode::Add, vec![]),
+                let opcode = match op {
+                    InfixOp::Plus => OpCode::Add,
+                    InfixOp::Minus => OpCode::Sub,
+                    InfixOp::Slash => OpCode::Div,
+                    InfixOp::Asterisk => OpCode::Mul,
                     op => todo!("opcode for {op}"),
-                }
+                };
+                self.emit(opcode, vec![]);
             }
             Expr::IntegerLiteral(int) => {
                 let obj = Object::Int(*int);
@@ -89,17 +96,56 @@ mod tests {
 
     #[test]
     fn integer_arithmetic() {
-        let tests = [(
-            "1 + 2",
-            Bytecode {
-                constants: vec![Object::Int(1), Object::Int(2)],
-                instrs: Instructions::from_iter([
-                    Instruction::new(OpCode::Constant, vec![0]),
-                    Instruction::new(OpCode::Constant, vec![1]),
-                    Instruction::new(OpCode::Add, vec![]),
-                ]),
-            },
-        )];
+        let tests = [
+            (
+                "1 + 2",
+                Bytecode {
+                    constants: vec![Object::Int(1), Object::Int(2)],
+                    instrs: Instructions::from_iter([
+                        Instruction::new(OpCode::Constant, vec![0]),
+                        Instruction::new(OpCode::Constant, vec![1]),
+                        Instruction::new(OpCode::Add, vec![]),
+                        Instruction::new(OpCode::Pop, vec![]),
+                    ]),
+                },
+            ),
+            (
+                "1 - 2",
+                Bytecode {
+                    constants: vec![Object::Int(1), Object::Int(2)],
+                    instrs: Instructions::from_iter([
+                        Instruction::new(OpCode::Constant, vec![0]),
+                        Instruction::new(OpCode::Constant, vec![1]),
+                        Instruction::new(OpCode::Sub, vec![]),
+                        Instruction::new(OpCode::Pop, vec![]),
+                    ]),
+                },
+            ),
+            (
+                "1 * 2",
+                Bytecode {
+                    constants: vec![Object::Int(1), Object::Int(2)],
+                    instrs: Instructions::from_iter([
+                        Instruction::new(OpCode::Constant, vec![0]),
+                        Instruction::new(OpCode::Constant, vec![1]),
+                        Instruction::new(OpCode::Mul, vec![]),
+                        Instruction::new(OpCode::Pop, vec![]),
+                    ]),
+                },
+            ),
+            (
+                "1 / 2",
+                Bytecode {
+                    constants: vec![Object::Int(1), Object::Int(2)],
+                    instrs: Instructions::from_iter([
+                        Instruction::new(OpCode::Constant, vec![0]),
+                        Instruction::new(OpCode::Constant, vec![1]),
+                        Instruction::new(OpCode::Div, vec![]),
+                        Instruction::new(OpCode::Pop, vec![]),
+                    ]),
+                },
+            ),
+        ];
 
         for (input, expect) in tests {
             let lexer = Lexer::new(input);

@@ -110,13 +110,21 @@ impl FromIterator<Instruction> for Instructions {
 }
 
 /// An opcode in the monkey VM.
-#[derive(Debug, TryFromPrimitive)]
+#[derive(Debug, TryFromPrimitive, Clone, Copy)]
 #[repr(u8)]
 pub enum OpCode {
     /// Pull an object from the constant pool [u16]
     Constant,
     /// Add the top two objects on the stack
     Add,
+    /// Subtract the top two objects on the stack
+    Sub,
+    /// Add the top two objects on the stack
+    Div,
+    /// Subtract the top two objects on the stack
+    Mul,
+    /// Pop the top of the stack
+    Pop,
 }
 
 #[derive(Debug, Clone)]
@@ -148,7 +156,11 @@ impl OpCode {
 
         build_defs!(self,
             Constant: [OpWidth::HalfWord],
-            Add: []
+            Pop: [],
+            Add: [],
+            Sub: [],
+            Div: [],
+            Mul: []
         )
     }
 }
