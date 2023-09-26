@@ -11,6 +11,18 @@ use crate::{
 
 const STACK_SIZE: usize = 2048;
 
+macro_rules! cast {
+    ($obj:expr, $ty:ident) => {{
+        let Object::$ty(obj) = $obj else {
+            return Err(RuntimeError::ExpectedType {
+                expected: Type::$ty,
+                got: $obj.monkey_type(),
+            });
+        };
+        obj
+    }};
+}
+
 #[derive(Debug)]
 pub struct Vm {
     instructions: Instructions,
@@ -45,27 +57,21 @@ impl Vm {
                     ip += 2;
                 }
                 OpCode::Add => {
-                    let right = self
-                        .pop()
-                        .expect("bytecode error: right side of add does not exist");
-                    let left = self
-                        .pop()
-                        .expect("bytecode error: left side of add does not exist");
-
-                    let Object::Int(l) = left else {
-                        return Err(RuntimeError::ExpectedType {
-                            expected: Type::Int,
-                            got: left.monkey_type(),
-                        });
+                    let right = {
+                        let right = self
+                            .pop()
+                            .expect("bytecode error: right side of add does not exist");
+                        *cast!(right, Int)
                     };
-                    let Object::Int(r) = right else {
-                        return Err(RuntimeError::ExpectedType {
-                            expected: Type::Int,
-                            got: left.monkey_type(),
-                        });
+                    let left = {
+                        let left = self
+                            .pop()
+                            .expect("bytecode error: left side of add does not exist");
+                        *cast!(left, Int)
                     };
 
-                    self.push(Object::Int(l + r))?;
+                    let sum = left + right;
+                    self.push(Object::Int(sum))?;
                 }
             }
 
@@ -75,9 +81,9 @@ impl Vm {
         Ok(())
     }
 
-    fn pop(&mut self) -> Option<Object> {
+    fn pop(&mut self) -> Option<&Object> {
         self.sp -= 1;
-        self.stack.pop()
+        self.stack.get(self.sp)
     }
 
     fn push(&mut self, obj: Object) -> Result<()> {
