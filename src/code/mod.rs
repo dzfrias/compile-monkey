@@ -125,6 +125,10 @@ pub enum OpCode {
     Mul,
     /// Pop the top of the stack
     Pop,
+    /// Push the boolean `True` on the stack
+    True,
+    /// Push the boolean `False` on the stack
+    False,
 }
 
 #[derive(Debug, Clone)]
@@ -160,7 +164,9 @@ impl OpCode {
             Add: [],
             Sub: [],
             Div: [],
-            Mul: []
+            Mul: [],
+            True: [],
+            False: []
         )
     }
 }

@@ -72,6 +72,13 @@ impl Compiler {
                 self.constants.push(obj);
                 self.emit(OpCode::Constant, vec![(self.constants.len() - 1) as u32]);
             }
+            Expr::BooleanLiteral(bool) => {
+                let opcode = match bool {
+                    true => OpCode::True,
+                    false => OpCode::False,
+                };
+                self.emit(opcode, vec![]);
+            }
             expr => todo!("compile expr for: {expr}"),
         }
     }
@@ -94,69 +101,107 @@ mod tests {
         };
     }
 
+    macro_rules! compiler_tests {
+        ($([$input:expr, { constants: $consts:expr, instrs: [$(($opcode:ident$(, [$($operand:expr),*])?)),* $(,)?] }]),+ $(,)?) => {
+            $(
+                let lexer = Lexer::new($input);
+                let parser = Parser::new(lexer);
+                let program = parser
+                    .parse_program()
+                    .expect("input should have no parse errors");
+                let compiler = Compiler::new();
+                let bytecode = compiler.compile(program);
+                let expect = Bytecode {
+                    constants: $consts.into(),
+                    instrs: Instructions::from_iter([
+                        $(
+                            Instruction::new(OpCode::$opcode, vec![$($($operand,)*)?]),
+                         )*
+                    ]),
+                };
+                assert_instrs!(expect.instrs, bytecode.instrs);
+                assert_eq!(expect.constants, bytecode.constants, "invalid constant pool");
+             )+
+        };
+    }
+
     #[test]
     fn integer_arithmetic() {
-        let tests = [
-            (
+        compiler_tests!(
+            [
                 "1 + 2",
-                Bytecode {
-                    constants: vec![Object::Int(1), Object::Int(2)],
-                    instrs: Instructions::from_iter([
-                        Instruction::new(OpCode::Constant, vec![0]),
-                        Instruction::new(OpCode::Constant, vec![1]),
-                        Instruction::new(OpCode::Add, vec![]),
-                        Instruction::new(OpCode::Pop, vec![]),
-                    ]),
-                },
-            ),
-            (
+                {
+                    constants: [Object::Int(1), Object::Int(2)],
+                    instrs: [
+                        (Constant, [0]),
+                        (Constant, [1]),
+                        (Add),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
                 "1 - 2",
-                Bytecode {
-                    constants: vec![Object::Int(1), Object::Int(2)],
-                    instrs: Instructions::from_iter([
-                        Instruction::new(OpCode::Constant, vec![0]),
-                        Instruction::new(OpCode::Constant, vec![1]),
-                        Instruction::new(OpCode::Sub, vec![]),
-                        Instruction::new(OpCode::Pop, vec![]),
-                    ]),
-                },
-            ),
-            (
-                "1 * 2",
-                Bytecode {
-                    constants: vec![Object::Int(1), Object::Int(2)],
-                    instrs: Instructions::from_iter([
-                        Instruction::new(OpCode::Constant, vec![0]),
-                        Instruction::new(OpCode::Constant, vec![1]),
-                        Instruction::new(OpCode::Mul, vec![]),
-                        Instruction::new(OpCode::Pop, vec![]),
-                    ]),
-                },
-            ),
-            (
+                {
+                    constants: [Object::Int(1), Object::Int(2)],
+                    instrs: [
+                        (Constant, [0]),
+                        (Constant, [1]),
+                        (Sub),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
                 "1 / 2",
-                Bytecode {
-                    constants: vec![Object::Int(1), Object::Int(2)],
-                    instrs: Instructions::from_iter([
-                        Instruction::new(OpCode::Constant, vec![0]),
-                        Instruction::new(OpCode::Constant, vec![1]),
-                        Instruction::new(OpCode::Div, vec![]),
-                        Instruction::new(OpCode::Pop, vec![]),
-                    ]),
-                },
-            ),
-        ];
+                {
+                    constants: [Object::Int(1), Object::Int(2)],
+                    instrs: [
+                        (Constant, [0]),
+                        (Constant, [1]),
+                        (Div),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "1 * 2",
+                {
+                    constants: [Object::Int(1), Object::Int(2)],
+                    instrs: [
+                        (Constant, [0]),
+                        (Constant, [1]),
+                        (Mul),
+                        (Pop),
+                    ]
+                }
+            ],
+        );
+    }
 
-        for (input, expect) in tests {
-            let lexer = Lexer::new(input);
-            let parser = Parser::new(lexer);
-            let program = parser
-                .parse_program()
-                .expect("input should have no parse errors");
-            let compiler = Compiler::new();
-            let bytecode = compiler.compile(program);
-            assert_instrs!(expect.instrs, bytecode.instrs);
-            assert_eq!(expect.constants, bytecode.constants);
-        }
+    #[test]
+    fn boolean_literals() {
+        compiler_tests!(
+            [
+                "true",
+                {
+                    constants: [],
+                    instrs: [
+                        (True),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "false",
+                {
+                    constants: [],
+                    instrs: [
+                        (False),
+                        (Pop),
+                    ]
+                }
+            ],
+        );
     }
 }

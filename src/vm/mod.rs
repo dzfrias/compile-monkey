@@ -10,6 +10,8 @@ use crate::{
 };
 
 const STACK_SIZE: usize = 2048;
+const TRUE: Object = Object::Bool(true);
+const FALSE: Object = Object::Bool(false);
 
 macro_rules! cast {
     ($obj:expr, $ty:ident) => {{
@@ -64,6 +66,8 @@ impl Vm {
                 OpCode::Pop => {
                     self.last_popped = self.pop();
                 }
+                OpCode::True => self.push(TRUE)?,
+                OpCode::False => self.push(FALSE)?,
             }
 
             ip += 1;
@@ -130,7 +134,7 @@ mod tests {
     use super::*;
 
     macro_rules! vm_test {
-        ($([$input:expr, $expect:expr]),+) => {
+        ($([$input:expr, $expect:expr]),+ $(,)?) => {
             $(
                 let lexer = Lexer::new($input);
                 let parser = Parser::new(lexer);
@@ -152,7 +156,15 @@ mod tests {
             ["1 + 2", &Object::Int(3)],
             ["1 - 2", &Object::Int(-1)],
             ["4 / 2", &Object::Int(2)],
-            ["4 * 2", &Object::Int(8)]
+            ["4 * 2", &Object::Int(8)],
+        );
+    }
+
+    #[test]
+    fn can_eval_boolean_literals() {
+        vm_test!(
+            ["true", &Object::Bool(true)],
+            ["false", &Object::Bool(false)],
         );
     }
 }
