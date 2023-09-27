@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::{env::Env, frontend::ast::*};
 use std::{
     cell::RefCell,

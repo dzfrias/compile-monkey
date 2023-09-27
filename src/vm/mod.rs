@@ -5,13 +5,11 @@ pub mod error;
 use crate::{
     code::{Instructions, OpCode},
     compiler::Bytecode,
-    object::{Object, Type},
+    object::{Object, Type, FALSE, TRUE},
     vm::error::{Result, RuntimeError},
 };
 
 const STACK_SIZE: usize = 2048;
-const TRUE: Object = Object::Bool(true);
-const FALSE: Object = Object::Bool(false);
 
 macro_rules! cast {
     ($obj:expr, $ty:ident) => {{
