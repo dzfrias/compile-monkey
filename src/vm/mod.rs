@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod error;
 
 use crate::{
@@ -103,15 +101,17 @@ impl Vm {
         let left = cast!(left, Int);
 
         let result = match op {
-            OpCode::Sub => left - right,
-            OpCode::Add => left + right,
-            OpCode::Mul => left * right,
-            OpCode::Div => left / right,
+            OpCode::Sub => left.checked_sub(right),
+            OpCode::Add => left.checked_add(right),
+            OpCode::Mul => left.checked_mul(right),
+            OpCode::Div => left.checked_div(right),
             op => panic!("should not call with opcode: {op:?}"),
         };
-        self.push(Object::Int(result))?;
 
-        Ok(())
+        match result {
+            Some(n) => self.push(Object::Int(n)),
+            None => Err(RuntimeError::IntegerOverflow),
+        }
     }
 
     fn read_u16(&self, start: usize) -> u16 {

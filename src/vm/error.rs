@@ -10,4 +10,6 @@ pub enum RuntimeError {
     ExpectedType { expected: Type, got: Type },
     #[error("stack overflow")]
     StackOverflow,
+    #[error("integer overflow")]
+    IntegerOverflow,
 }
