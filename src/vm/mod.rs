@@ -97,7 +97,13 @@ impl Vm {
         match (left, right) {
             (Object::Int(lhs), Object::Int(rhs)) => self.execute_integer_infix_op(op, lhs, rhs)?,
             (Object::Bool(lhs), Object::Bool(rhs)) => self.execute_bool_infix_op(op, lhs, rhs)?,
-            _ => todo!("error"),
+            (lhs, rhs) => {
+                return Err(RuntimeError::InvalidTypes {
+                    lhs: lhs.monkey_type(),
+                    rhs: rhs.monkey_type(),
+                    op: opcode_to_infix_op(op).expect("should not be called with invalid op"),
+                })
+            }
         }
 
         Ok(())
