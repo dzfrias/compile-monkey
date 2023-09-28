@@ -56,13 +56,22 @@ impl Compiler {
     fn compile_expr(&mut self, expr: &Expr) {
         match expr {
             Expr::Infix { left, op, right } => {
-                self.compile_expr(&left);
-                self.compile_expr(&right);
+                if *op == InfixOp::Lt {
+                    self.compile_expr(&right);
+                    self.compile_expr(&left);
+                } else {
+                    self.compile_expr(&left);
+                    self.compile_expr(&right);
+                }
                 let opcode = match op {
                     InfixOp::Plus => OpCode::Add,
                     InfixOp::Minus => OpCode::Sub,
                     InfixOp::Slash => OpCode::Div,
                     InfixOp::Asterisk => OpCode::Mul,
+                    InfixOp::Gt => OpCode::GreaterThan,
+                    InfixOp::Eq => OpCode::Equal,
+                    InfixOp::NotEq => OpCode::NotEqual,
+                    InfixOp::Lt => OpCode::GreaterThan,
                     op => todo!("opcode for {op}"),
                 };
                 self.emit(opcode, vec![]);
@@ -120,7 +129,7 @@ mod tests {
                     ]),
                 };
                 assert_instrs!(expect.instrs, bytecode.instrs);
-                assert_eq!(expect.constants, bytecode.constants, "invalid constant pool");
+                assert_eq!(expect.constants, bytecode.constants, "invalid constant pool for input {}", $input);
              )+
         };
     }
@@ -198,6 +207,60 @@ mod tests {
                     constants: [],
                     instrs: [
                         (False),
+                        (Pop),
+                    ]
+                }
+            ],
+        );
+    }
+
+    #[test]
+    fn boolean_infix_exprs() {
+        compiler_tests!(
+            [
+                "1 > 2",
+                {
+                    constants: [Object::Int(1), Object::Int(2)],
+                    instrs: [
+                        (Constant, [0]),
+                        (Constant, [1]),
+                        (GreaterThan),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "1 < 2",
+                {
+                    constants: [Object::Int(2), Object::Int(1)],
+                    instrs: [
+                        (Constant, [0]),
+                        (Constant, [1]),
+                        (GreaterThan),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "true == false",
+                {
+                    constants: [],
+                    instrs: [
+                        (True),
+                        (False),
+                        (Equal),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "true != false",
+                {
+                    constants: [],
+                    instrs: [
+                        (True),
+                        (False),
+                        (NotEqual),
                         (Pop),
                     ]
                 }

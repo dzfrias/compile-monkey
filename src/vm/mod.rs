@@ -3,23 +3,11 @@ pub mod error;
 use crate::{
     code::{Instructions, OpCode},
     compiler::Bytecode,
-    object::{Object, Type, FALSE, TRUE},
+    object::{Object, FALSE, TRUE},
     vm::error::{Result, RuntimeError},
 };
 
 const STACK_SIZE: usize = 2048;
-
-macro_rules! cast {
-    ($obj:expr, $ty:ident) => {{
-        let Object::$ty(obj) = $obj else {
-            return Err(RuntimeError::ExpectedType {
-                expected: Type::$ty,
-                got: $obj.monkey_type(),
-            });
-        };
-        obj
-    }};
-}
 
 #[derive(Debug)]
 pub struct Vm {
@@ -56,12 +44,19 @@ impl Vm {
                     self.push(constant.clone())?;
                     ip += 2;
                 }
-                OpCode::Add | OpCode::Sub | OpCode::Div | OpCode::Mul => {
-                    self.execute_binary_op(op)?;
-                }
+
+                OpCode::Add
+                | OpCode::Sub
+                | OpCode::Div
+                | OpCode::Mul
+                | OpCode::Equal
+                | OpCode::NotEqual
+                | OpCode::GreaterThan => self.execute_infix_op(op)?,
+
                 OpCode::Pop => {
                     self.last_popped = self.pop();
                 }
+
                 OpCode::True => self.push(TRUE)?,
                 OpCode::False => self.push(FALSE)?,
             }
@@ -90,28 +85,60 @@ impl Vm {
         Ok(())
     }
 
-    fn execute_binary_op(&mut self, op: OpCode) -> Result<()> {
+    fn execute_infix_op(&mut self, op: OpCode) -> Result<()> {
         let right = self
             .pop()
             .expect("bytecode error: right side of add does not exist");
-        let right = cast!(right, Int);
         let left = self
             .pop()
             .expect("bytecode error: left side of add does not exist");
-        let left = cast!(left, Int);
 
-        let result = match op {
-            OpCode::Sub => left.checked_sub(right),
-            OpCode::Add => left.checked_add(right),
-            OpCode::Mul => left.checked_mul(right),
-            OpCode::Div => left.checked_div(right),
-            op => panic!("should not call with opcode: {op:?}"),
+        match (left, right) {
+            (Object::Int(lhs), Object::Int(rhs)) => self.execute_integer_infix_op(op, lhs, rhs)?,
+            (Object::Bool(lhs), Object::Bool(rhs)) => self.execute_bool_infix_op(op, lhs, rhs)?,
+            _ => todo!("error"),
+        }
+
+        Ok(())
+    }
+
+    fn execute_integer_infix_op(&mut self, op: OpCode, l: i64, r: i64) -> Result<()> {
+        let obj = match op {
+            OpCode::Sub | OpCode::Add | OpCode::Mul | OpCode::Div => {
+                let result = match op {
+                    OpCode::Sub => l.checked_sub(r),
+                    OpCode::Add => l.checked_add(r),
+                    OpCode::Mul => l.checked_mul(r),
+                    OpCode::Div => l.checked_div(r),
+                    _ => unreachable!(),
+                };
+
+                match result {
+                    Some(i) => Object::Int(i),
+                    None => return Err(RuntimeError::IntegerOverflow),
+                }
+            }
+            OpCode::GreaterThan => Object::Bool(l > r),
+            OpCode::Equal => Object::Bool(l == r),
+            OpCode::NotEqual => Object::Bool(l != r),
+            op => todo!("error, got {op:?}"),
         };
 
-        match result {
-            Some(n) => self.push(Object::Int(n)),
-            None => Err(RuntimeError::IntegerOverflow),
-        }
+        self.push(obj)?;
+
+        Ok(())
+    }
+
+    fn execute_bool_infix_op(&mut self, op: OpCode, lhs: bool, rhs: bool) -> Result<()> {
+        let res = match op {
+            OpCode::Equal => lhs == rhs,
+            OpCode::NotEqual => lhs != rhs,
+            op => todo!("error, got {op:?}"),
+        };
+
+        self.push(Object::Bool(res))?;
+
+        Ok(())
     }
 
     fn read_u16(&self, start: usize) -> u16 {
@@ -142,7 +169,7 @@ mod tests {
                 let mut vm = Vm::new(bytecode);
                 vm.run().expect("vm should run with no errors");
                 let stack_top = vm.last_popped().unwrap();
-                assert_eq!($expect, stack_top);
+                assert_eq!($expect, stack_top, "error on input {}", $input);
              )+
         };
     }
@@ -163,6 +190,17 @@ mod tests {
         vm_test!(
             ["true", &Object::Bool(true)],
             ["false", &Object::Bool(false)],
+        );
+    }
+
+    #[test]
+    fn can_eval_boolean_infix_ops() {
+        vm_test!(
+            ["true == true", &Object::Bool(true)],
+            ["false == true", &Object::Bool(false)],
+            ["1 > 2", &Object::Bool(false)],
+            ["2 < 1", &Object::Bool(false)],
+            ["10 == 10", &Object::Bool(true)],
         );
     }
 }

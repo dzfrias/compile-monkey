@@ -129,6 +129,12 @@ pub enum OpCode {
     True,
     /// Push the boolean `False` on the stack
     False,
+    /// Check if the top two objects on the stack are equal
+    Equal,
+    /// Check if the top two objects on the stack are not equal
+    NotEqual,
+    /// Check if the second to top object on the stack is greater than the top object on the stack.
+    GreaterThan,
 }
 
 #[derive(Debug, Clone)]
@@ -146,7 +152,7 @@ pub enum OpWidth {
 impl OpCode {
     pub fn definition(&self) -> Definition {
         macro_rules! build_defs {
-            ($op:expr, $($name:ident: [$($width:expr),*]),+) => {
+            ($op:expr, $($name:ident: [$($width:expr),*]),+ $(,)?) => {
                 match $op {
                     $(
                         Self::$name => Definition {
@@ -166,7 +172,10 @@ impl OpCode {
             Div: [],
             Mul: [],
             True: [],
-            False: []
+            False: [],
+            Equal: [],
+            NotEqual: [],
+            GreaterThan: [],
         )
     }
 }
