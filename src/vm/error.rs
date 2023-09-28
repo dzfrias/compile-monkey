@@ -1,13 +1,13 @@
 use thiserror::Error;
 
-use crate::object::Type;
+use crate::{frontend::ast::InfixOp, object::Type};
 
 pub type Result<T> = std::result::Result<T, RuntimeError>;
 
 #[derive(Debug, Error)]
 pub enum RuntimeError {
-    #[error("expected type: {expected}, got: {got}")]
-    ExpectedType { expected: Type, got: Type },
+    #[error("invalid types: {lhs} and {rhs} with operation \"{op}\"")]
+    InvalidTypes { lhs: Type, rhs: Type, op: InfixOp },
     #[error("stack overflow")]
     StackOverflow,
     #[error("integer overflow")]

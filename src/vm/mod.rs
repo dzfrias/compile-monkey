@@ -3,7 +3,8 @@ pub mod error;
 use crate::{
     code::{Instructions, OpCode},
     compiler::Bytecode,
-    object::{Object, FALSE, TRUE},
+    frontend::ast::InfixOp,
+    object::{Object, Type, FALSE, TRUE},
     vm::error::{Result, RuntimeError},
 };
 
@@ -121,7 +122,7 @@ impl Vm {
             OpCode::GreaterThan => Object::Bool(l > r),
             OpCode::Equal => Object::Bool(l == r),
             OpCode::NotEqual => Object::Bool(l != r),
-            op => todo!("error, got {op:?}"),
+            op => panic!("BUG: should never have invalid integer infix operation: {op:?}"),
         };
 
         self.push(obj)?;
@@ -133,7 +134,15 @@ impl Vm {
         let res = match op {
             OpCode::Equal => lhs == rhs,
             OpCode::NotEqual => lhs != rhs,
-            op => todo!("error, got {op:?}"),
+            op => {
+                let corresponding = opcode_to_infix_op(op)
+                    .expect("BUG: should not be called with opcode that is not an infix op");
+                return Err(RuntimeError::InvalidTypes {
+                    lhs: Type::Bool,
+                    rhs: Type::Bool,
+                    op: corresponding,
+                });
+            }
         };
 
         self.push(Object::Bool(res))?;
@@ -147,6 +156,20 @@ impl Vm {
             .expect("should be two bytes long");
         u16::from_be_bytes(bytes)
     }
+}
+
+fn opcode_to_infix_op(op: OpCode) -> Option<InfixOp> {
+    let corresponding = match op {
+        OpCode::Add => InfixOp::Plus,
+        OpCode::Sub => InfixOp::Minus,
+        OpCode::Div => InfixOp::Slash,
+        OpCode::Mul => InfixOp::Asterisk,
+        OpCode::GreaterThan => InfixOp::Gt,
+        OpCode::Equal => InfixOp::Eq,
+        OpCode::NotEqual => InfixOp::NotEq,
+        _ => return None,
+    };
+    Some(corresponding)
 }
 
 #[cfg(test)]
