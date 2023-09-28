@@ -5,7 +5,7 @@ mod frontend;
 mod object;
 mod vm;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rustyline::error::ReadlineError;
 
 use crate::{
@@ -28,10 +28,12 @@ fn main() -> Result<()> {
                 let compiler = Compiler::new();
                 let bytecode = compiler.compile(program);
                 let mut vm = Vm::new(bytecode);
-                vm.run().context("runtime error")?;
-                if let Some(top) = vm.last_popped() {
+                if let Err(runtime) = vm.run() {
+                    println!("{runtime}");
+                } else if let Some(top) = vm.last_popped() {
                     println!("{top}")
                 }
+                println!()
             }
             Err(ReadlineError::Eof) => break,
             Err(ReadlineError::Interrupted) => break,
