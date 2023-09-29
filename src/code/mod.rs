@@ -135,6 +135,10 @@ pub enum OpCode {
     NotEqual,
     /// Check if the second to top object on the stack is greater than the top object on the stack.
     GreaterThan,
+    /// - prefix operator
+    Minus,
+    /// Not prefix operator
+    Bang,
 }
 
 #[derive(Debug, Clone)]
@@ -176,6 +180,8 @@ impl OpCode {
             Equal: [],
             NotEqual: [],
             GreaterThan: [],
+            Minus: [],
+            Bang: [],
         )
     }
 }

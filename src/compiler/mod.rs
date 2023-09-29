@@ -1,6 +1,6 @@
 use crate::{
     code::{Instruction, Instructions, OpCode},
-    frontend::ast::{Block, Expr, InfixOp, Program, Stmt},
+    frontend::ast::{Block, Expr, InfixOp, PrefixOp, Program, Stmt},
     object::Object,
 };
 
@@ -73,6 +73,15 @@ impl Compiler {
                     InfixOp::NotEq => OpCode::NotEqual,
                     InfixOp::Lt => OpCode::GreaterThan,
                     op => todo!("opcode for {op}"),
+                };
+                self.emit(opcode, vec![]);
+            }
+            Expr::Prefix { op, expr } => {
+                self.compile_expr(expr);
+                let opcode = match op {
+                    PrefixOp::Bang => OpCode::Bang,
+                    PrefixOp::Minus => OpCode::Minus,
+                    PrefixOp::Plus => return,
                 };
                 self.emit(opcode, vec![]);
             }
@@ -265,6 +274,34 @@ mod tests {
                     ]
                 }
             ],
+        );
+    }
+
+    #[test]
+    fn prefix_exprs() {
+        compiler_tests!(
+            [
+                "-1",
+                {
+                    constants: [Object::Int(1)],
+                    instrs: [
+                        (Constant, [0]),
+                        (Minus),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "!true",
+                {
+                    constants: [],
+                    instrs: [
+                        (True),
+                        (Bang),
+                        (Pop),
+                    ]
+                }
+            ]
         );
     }
 }

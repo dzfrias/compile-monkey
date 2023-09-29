@@ -3,7 +3,7 @@ pub mod error;
 use crate::{
     code::{Instructions, OpCode},
     compiler::Bytecode,
-    frontend::ast::InfixOp,
+    frontend::ast::{InfixOp, PrefixOp},
     object::{Object, Type, FALSE, TRUE},
     vm::error::{Result, RuntimeError},
 };
@@ -53,6 +53,8 @@ impl Vm {
                 | OpCode::Equal
                 | OpCode::NotEqual
                 | OpCode::GreaterThan => self.execute_infix_op(op)?,
+
+                OpCode::Minus | OpCode::Bang => self.execute_prefix_op(op)?,
 
                 OpCode::Pop => {
                     self.last_popped = self.pop();
@@ -156,6 +158,44 @@ impl Vm {
         Ok(())
     }
 
+    fn execute_prefix_op(&mut self, op: OpCode) -> Result<()> {
+        let expr = self
+            .pop()
+            .expect("bytecode error: expression side of prefix operator does not exist");
+
+        match expr {
+            Object::Int(int) => self.execute_integer_prefix_op(op, int),
+            Object::Bool(bool) => self.execute_bool_prefix_op(op, bool),
+
+            _ => Err(RuntimeError::InvalidType {
+                expr: expr.monkey_type(),
+                op: opcode_to_prefix_op(op)
+                    .expect("should not be called with invalid prefix opcode"),
+            }),
+        }
+    }
+
+    fn execute_integer_prefix_op(&mut self, op: OpCode, int: i64) -> Result<()> {
+        match op {
+            OpCode::Minus => self.push(Object::Int(-int)),
+            _ => Err(RuntimeError::InvalidType {
+                expr: Type::Int,
+                op: opcode_to_prefix_op(op)
+                    .expect("should not be called with invalid prefix opcode"),
+            }),
+        }
+    }
+
+    fn execute_bool_prefix_op(&mut self, op: OpCode, bool: bool) -> Result<()> {
+        match op {
+            OpCode::Bang => self.push(Object::Bool(!bool)),
+            _ => Err(RuntimeError::InvalidType {
+                expr: Type::Bool,
+                op: opcode_to_prefix_op(op)
+                    .expect("should not be called with invalid prefix opcode"),
+            }),
+        }
+    }
     fn read_u16(&self, start: usize) -> u16 {
         let bytes: [u8; 2] = self.instructions.as_bytes()[start..start + 2]
             .try_into()
@@ -173,6 +213,15 @@ fn opcode_to_infix_op(op: OpCode) -> Option<InfixOp> {
         OpCode::GreaterThan => InfixOp::Gt,
         OpCode::Equal => InfixOp::Eq,
         OpCode::NotEqual => InfixOp::NotEq,
+        _ => return None,
+    };
+    Some(corresponding)
+}
+
+fn opcode_to_prefix_op(op: OpCode) -> Option<PrefixOp> {
+    let corresponding = match op {
+        OpCode::Minus => PrefixOp::Minus,
+        OpCode::Bang => PrefixOp::Bang,
         _ => return None,
     };
     Some(corresponding)
@@ -230,6 +279,15 @@ mod tests {
             ["1 > 2", &Object::Bool(false)],
             ["2 < 1", &Object::Bool(false)],
             ["10 == 10", &Object::Bool(true)],
+        );
+    }
+
+    #[test]
+    fn can_eval_prefix_ops() {
+        vm_test!(
+            ["!true", &Object::Bool(false)],
+            ["!false", &Object::Bool(true)],
+            ["-1", &Object::Int(-1)],
         );
     }
 }

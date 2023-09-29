@@ -1,6 +1,9 @@
 use thiserror::Error;
 
-use crate::{frontend::ast::InfixOp, object::Type};
+use crate::{
+    frontend::ast::{InfixOp, PrefixOp},
+    object::Type,
+};
 
 pub type Result<T> = std::result::Result<T, RuntimeError>;
 
@@ -8,6 +11,8 @@ pub type Result<T> = std::result::Result<T, RuntimeError>;
 pub enum RuntimeError {
     #[error("invalid types: {lhs} and {rhs} with operation \"{op}\"")]
     InvalidTypes { lhs: Type, rhs: Type, op: InfixOp },
+    #[error("invalid type: {expr} with operation \"{op}\"")]
+    InvalidType { expr: Type, op: PrefixOp },
     #[error("stack overflow")]
     StackOverflow,
     #[error("integer overflow")]
