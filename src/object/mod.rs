@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
-use crate::{env::Env, frontend::ast::*};
+mod env;
+
+use crate::frontend::ast::*;
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -8,6 +10,8 @@ use std::{
     hash::Hash,
     rc::Rc,
 };
+
+pub use env::Env;
 
 pub const TRUE: Object = Object::Bool(true);
 pub const FALSE: Object = Object::Bool(false);

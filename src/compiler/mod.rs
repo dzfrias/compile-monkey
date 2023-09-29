@@ -1,7 +1,7 @@
 use crate::{
-    code::{Instruction, Instructions, OpCode},
     frontend::ast::{Block, Expr, InfixOp, PrefixOp, Program, Stmt},
     object::Object,
+    opcode::{Instruction, Instructions, OpCode},
 };
 
 #[derive(Debug)]

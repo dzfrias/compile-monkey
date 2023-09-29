@@ -1,10 +1,10 @@
 pub mod error;
 
 use crate::{
-    code::{Instructions, OpCode},
     compiler::Bytecode,
     frontend::ast::{InfixOp, PrefixOp},
     object::{Object, Type, FALSE, TRUE},
+    opcode::{Instructions, OpCode},
     vm::error::{Result, RuntimeError},
 };
 

@@ -1,8 +1,7 @@
-mod code;
 mod compiler;
-mod env;
 mod frontend;
 mod object;
+mod opcode;
 mod vm;
 
 use anyhow::Result;
