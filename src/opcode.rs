@@ -62,6 +62,18 @@ impl Instructions {
         self.0.extend_from_slice(instr.as_bytes());
     }
 
+    pub fn pop(&mut self) -> Option<u8> {
+        self.0.pop()
+    }
+
+    pub fn replace_instr(&mut self, pos: usize, new: Instruction) {
+        self.replace_bytes(pos, new.as_bytes());
+    }
+
+    pub fn replace_bytes(&mut self, pos: usize, bytes: &[u8]) {
+        self.0[pos..pos + bytes.len()].copy_from_slice(&bytes);
+    }
+
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
@@ -110,7 +122,7 @@ impl FromIterator<Instruction> for Instructions {
 }
 
 /// An opcode in the monkey VM.
-#[derive(Debug, TryFromPrimitive, Clone, Copy)]
+#[derive(Debug, TryFromPrimitive, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum OpCode {
     /// Pull an object from the constant pool [u16]
@@ -139,6 +151,12 @@ pub enum OpCode {
     Minus,
     /// Not prefix operator
     Bang,
+    /// Jump to instruction [u16]
+    Jump,
+    /// Jump to instruction if the object on the stack is not truthy [u16]
+    JumpNotTruthy,
+    /// Push the null object onto the stack.
+    Null,
 }
 
 #[derive(Debug, Clone)]
@@ -182,6 +200,9 @@ impl OpCode {
             GreaterThan: [],
             Minus: [],
             Bang: [],
+            Jump: [OpWidth::HalfWord],
+            JumpNotTruthy: [OpWidth::HalfWord],
+            Null: [],
         )
     }
 }

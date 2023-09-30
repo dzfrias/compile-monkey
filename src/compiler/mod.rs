@@ -1,3 +1,5 @@
+use num_enum::TryFromPrimitive;
+
 use crate::{
     frontend::ast::{Block, Expr, InfixOp, PrefixOp, Program, Stmt},
     object::Object,
@@ -8,6 +10,9 @@ use crate::{
 pub struct Compiler {
     instrs: Instructions,
     constants: Vec<Object>,
+
+    last_opcode: OpCode,
+    prev_opcode: OpCode,
 }
 
 #[derive(Debug, PartialEq)]
@@ -21,6 +26,9 @@ impl Compiler {
         Self {
             instrs: Instructions::default(),
             constants: vec![],
+
+            last_opcode: OpCode::Add,
+            prev_opcode: OpCode::Add,
         }
     }
 
@@ -35,6 +43,19 @@ impl Compiler {
     fn emit(&mut self, opcode: OpCode, operands: Vec<u32>) {
         let instr = Instruction::new(opcode, operands);
         self.instrs.add(instr);
+        self.set_last_instr(opcode)
+    }
+
+    fn set_last_instr(&mut self, op: OpCode) {
+        self.prev_opcode = self.last_opcode;
+        self.last_opcode = op;
+    }
+
+    fn change_operand(&mut self, pos: usize, operand: u32) {
+        let op = OpCode::try_from_primitive(self.instrs.as_bytes()[pos])
+            .expect("instruction to mutate should be valid");
+        let new_instr = Instruction::new(op, vec![operand]);
+        self.instrs.replace_instr(pos, new_instr);
     }
 
     fn compile_block(&mut self, block: &Block) {
@@ -51,6 +72,10 @@ impl Compiler {
             }
             stmt => todo!("compile stmt for: {stmt}"),
         }
+    }
+
+    fn current_position(&self) -> usize {
+        self.instrs.as_bytes().len()
     }
 
     fn compile_expr(&mut self, expr: &Expr) {
@@ -97,6 +122,39 @@ impl Compiler {
                 };
                 self.emit(opcode, vec![]);
             }
+            Expr::If {
+                condition,
+                consequence,
+                alternative,
+            } => {
+                self.compile_expr(condition);
+                let jump_pos = self.current_position();
+                self.emit(OpCode::JumpNotTruthy, vec![9999]);
+                self.compile_block(consequence);
+                if self.last_opcode == OpCode::Pop {
+                    self.instrs.pop();
+                    self.last_opcode = self.prev_opcode;
+                }
+
+                // Position of the consequence jump instruction
+                let cons_jump_pos = self.current_position();
+                self.emit(OpCode::Jump, vec![9999]);
+                // Change operand of the conditional jump instruction to after the
+                // consequence
+                self.change_operand(jump_pos, self.current_position() as u32);
+                if let Some(alt) = alternative {
+                    self.compile_block(alt);
+                } else {
+                    self.emit(OpCode::Null, vec![]);
+                }
+                if self.last_opcode == OpCode::Pop {
+                    self.instrs.pop();
+                    self.last_opcode = self.prev_opcode;
+                }
+                // Change the operand of the consequence operand to the current position
+                // (after alt)
+                self.change_operand(cons_jump_pos, self.current_position() as u32);
+            }
             expr => todo!("compile expr for: {expr}"),
         }
     }
@@ -105,8 +163,8 @@ impl Compiler {
 #[cfg(test)]
 mod tests {
     use crate::{
-        code::{Instruction, OpCode},
         frontend::{lexer::Lexer, parser::Parser},
+        opcode::{Instruction, OpCode},
     };
 
     use super::*;
@@ -302,6 +360,46 @@ mod tests {
                     ]
                 }
             ]
+        );
+    }
+
+    #[test]
+    fn conditionals() {
+        compiler_tests!(
+            [
+                "if (true) { 10 }; 3333;",
+                {
+                    constants: [Object::Int(10), Object::Int(3333)],
+                    instrs: [
+                        (True),
+                        (JumpNotTruthy, [10]),
+                        (Constant, [0]), // 0010
+                        (Jump, [11]),
+                        (Null),
+                        (Pop), // 0011
+
+                        (Constant, [1]),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "if (true) { 10 } else { 20 }; 3333;",
+                {
+                    constants: [Object::Int(10), Object::Int(20), Object::Int(3333)],
+                    instrs: [
+                        (True),
+                        (JumpNotTruthy, [10]),
+                        (Constant, [0]),
+                        (Jump, [13]),
+                        (Constant, [1]), // 0010
+                        (Pop), // 0013
+
+                        (Constant, [2]),
+                        (Pop),
+                    ]
+                }
+            ],
         );
     }
 }

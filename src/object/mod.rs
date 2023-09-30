@@ -48,6 +48,17 @@ impl Object {
             Self::ReturnVal(val) => val.monkey_type(),
         }
     }
+
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            Object::Int(i) => *i > 0,
+            Object::Bool(b) => *b,
+            Object::String(s) => !s.is_empty(),
+            Object::Array(arr) => !arr.is_empty(),
+            Object::HashMap(hashmap) => !hashmap.is_empty(),
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Display for Object {

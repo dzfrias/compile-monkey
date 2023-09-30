@@ -3,7 +3,7 @@ pub mod error;
 use crate::{
     compiler::Bytecode,
     frontend::ast::{InfixOp, PrefixOp},
-    object::{Object, Type, FALSE, TRUE},
+    object::{Object, Type, FALSE, NULL, TRUE},
     opcode::{Instructions, OpCode},
     vm::error::{Result, RuntimeError},
 };
@@ -62,6 +62,21 @@ impl Vm {
 
                 OpCode::True => self.push(TRUE)?,
                 OpCode::False => self.push(FALSE)?,
+                OpCode::Jump => {
+                    let pos = self.read_u16(ip + 1);
+                    ip = (pos - 1) as usize
+                }
+                OpCode::JumpNotTruthy => {
+                    let pos = self.read_u16(ip + 1);
+                    ip += 2;
+                    let cond = self
+                        .pop()
+                        .expect("should never compile jump with nothing on the stack");
+                    if !cond.is_truthy() {
+                        ip = (pos - 1) as usize;
+                    }
+                }
+                OpCode::Null => self.push(NULL)?,
             }
 
             ip += 1;
@@ -166,6 +181,7 @@ impl Vm {
         match expr {
             Object::Int(int) => self.execute_integer_prefix_op(op, int),
             Object::Bool(bool) => self.execute_bool_prefix_op(op, bool),
+            Object::Null if op == OpCode::Bang => self.push(Object::Bool(true)),
 
             _ => Err(RuntimeError::InvalidType {
                 expr: expr.monkey_type(),
@@ -288,6 +304,18 @@ mod tests {
             ["!true", &Object::Bool(false)],
             ["!false", &Object::Bool(true)],
             ["-1", &Object::Int(-1)],
+            ["!(if (false) { 5 })", &Object::Bool(true)],
+        );
+    }
+
+    #[test]
+    fn can_eval_conditionals() {
+        vm_test!(
+            ["if (true) { 10 }", &Object::Int(10)],
+            ["if (true) { 10 } else { 20 }", &Object::Int(10)],
+            ["if (false) { 10 } else { 20 }", &Object::Int(20)],
+            ["if (1 < 2) { 10 } else { 20 }", &Object::Int(10)],
+            ["if (false) { 10 }", &Object::Null],
         );
     }
 }
