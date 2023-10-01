@@ -25,7 +25,6 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
-            // TODO: no longer initialize memory like this. Should panic on invalid access
             globals: Rc::new(RefCell::new(Vec::with_capacity(GLOBALS_SIZE))),
         }
     }
@@ -162,6 +161,9 @@ impl Vm {
         match (left, right) {
             (Object::Int(lhs), Object::Int(rhs)) => self.execute_integer_infix_op(op, lhs, rhs)?,
             (Object::Bool(lhs), Object::Bool(rhs)) => self.execute_bool_infix_op(op, lhs, rhs)?,
+            (Object::String(lhs), Object::String(rhs)) => {
+                self.execute_string_infix_op(op, lhs, rhs)?
+            }
             (lhs, rhs) => {
                 return Err(RuntimeError::InvalidTypes {
                     lhs: lhs.monkey_type(),
@@ -260,6 +262,24 @@ impl Vm {
             }),
         }
     }
+
+    fn execute_string_infix_op(&mut self, op: OpCode, lhs: String, rhs: String) -> Result<()> {
+        let obj = match op {
+            OpCode::Add => Object::String(lhs + &rhs),
+            _ => {
+                return Err(RuntimeError::InvalidTypes {
+                    lhs: Type::String,
+                    rhs: Type::String,
+                    op: opcode_to_infix_op(op)
+                        .expect("should not be called with invalid prefix opcode"),
+                })
+            }
+        };
+        self.push(obj)?;
+
+        Ok(())
+    }
+
     fn read_u16(&self, start: usize) -> u16 {
         let bytes: [u8; 2] = self.instructions.as_bytes()[start..start + 2]
             .try_into()
@@ -372,6 +392,14 @@ mod tests {
         vm_test!(
             ["let one = 1; one", &Object::Int(1)],
             ["let one = 1; let two = 2; one + two", &Object::Int(3)],
+        );
+    }
+
+    #[test]
+    fn can_eval_string_exprs() {
+        vm_test!(
+            ["\"hello\"", &Object::String("hello".to_owned())],
+            ["\"mon\" + \"key\"", &Object::String("monkey".to_owned())],
         );
     }
 }

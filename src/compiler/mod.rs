@@ -143,6 +143,12 @@ impl Compiler {
                 };
                 self.emit(opcode, vec![]);
             }
+            Expr::StringLiteral(literal) => {
+                let obj = Object::String(literal.clone());
+                self.state.constants.borrow_mut().push(obj);
+                let len = self.state.constants.borrow().len();
+                self.emit(OpCode::Constant, vec![(len - 1) as u32]);
+            }
             Expr::IntegerLiteral(int) => {
                 let obj = Object::Int(*int);
                 self.state.constants.borrow_mut().push(obj);
@@ -472,6 +478,34 @@ mod tests {
                         (Constant, [0]),
                         (SetGlobal, [0]),
                         (GetGlobal, [0]),
+                        (Pop),
+                    ]
+                }
+            ],
+        );
+    }
+
+    #[test]
+    fn string_exprs() {
+        compiler_tests!(
+            [
+                "\"message\"",
+                {
+                    constants: [Object::String("message".to_owned())],
+                    instrs: [
+                        (Constant, [0]),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "\"mon\" + \"key\"",
+                {
+                    constants: [Object::String("mon".to_owned()), Object::String("key".to_owned())],
+                    instrs: [
+                        (Constant, [0]),
+                        (Constant, [1]),
+                        (Add),
                         (Pop),
                     ]
                 }
