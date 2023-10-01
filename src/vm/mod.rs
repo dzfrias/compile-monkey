@@ -25,7 +25,8 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
-            globals: Rc::new(RefCell::new(vec![NULL; GLOBALS_SIZE])),
+            // TODO: no longer initialize memory like this. Should panic on invalid access
+            globals: Rc::new(RefCell::new(Vec::with_capacity(GLOBALS_SIZE))),
         }
     }
 }
@@ -109,9 +110,14 @@ impl Vm {
                 OpCode::SetGlobal => {
                     let global_index = self.read_u16(ip + 1) as usize;
                     ip += 2;
-                    self.state.globals.borrow_mut()[global_index] = self
+                    let obj = self
                         .pop()
                         .expect("should never set global with nothing on the stack");
+                    if global_index < self.state.globals.borrow().len() {
+                        self.state.globals.borrow_mut()[global_index] = obj;
+                    } else {
+                        self.state.globals.borrow_mut().push(obj);
+                    }
                 }
                 OpCode::GetGlobal => {
                     let global_index = self.read_u16(ip + 1) as usize;
