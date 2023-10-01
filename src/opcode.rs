@@ -149,6 +149,8 @@ pub enum OpCode {
     GetGlobal,
     /// Initialize a new array with N elements [N: u16]
     Array,
+    /// Initialize a new hashmap with N / 2 key-value pairs [N: u16]
+    HashMap,
 }
 
 #[derive(Debug, Clone)]
@@ -198,6 +200,7 @@ impl OpCode {
             SetGlobal: [OpWidth::HalfWord],
             GetGlobal: [OpWidth::HalfWord],
             Array: [OpWidth::HalfWord],
+            HashMap: [OpWidth::HalfWord],
         )
     }
 }

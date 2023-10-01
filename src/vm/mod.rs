@@ -1,6 +1,6 @@
 pub mod error;
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
     compiler::Bytecode,
@@ -132,6 +132,19 @@ impl Vm {
                         elems[len - i] = self.stack.pop().unwrap();
                     }
                     self.stack.push(Object::Array(elems))
+                }
+                OpCode::HashMap => {
+                    let mut kvs = self.read_u16(ip + 1) as usize;
+                    ip += 2;
+                    // kvs contains both the amount of keys as well as the amount of values
+                    let mut hashmap = HashMap::with_capacity(kvs / 2);
+                    while kvs > 0 {
+                        let val = self.pop().unwrap();
+                        let key = self.pop().unwrap();
+                        hashmap.insert(key, val);
+                        kvs -= 2;
+                    }
+                    self.stack.push(Object::HashMap(hashmap))
                 }
             }
 
@@ -322,6 +335,8 @@ fn opcode_to_prefix_op(op: OpCode) -> Option<PrefixOp> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use crate::{
         compiler::Compiler,
         frontend::{lexer::Lexer, parser::Parser},
@@ -339,7 +354,7 @@ mod tests {
                 let bytecode = compiler.compile(prog);
                 let mut vm = Vm::new(bytecode);
                 vm.run().expect("vm should run with no errors");
-                let stack_top = vm.last_popped().unwrap();
+                let stack_top = vm.last_popped().expect("stack should have something last popped");
                 assert_eq!($expect, stack_top, "error on input {}", $input);
              )+
         };
@@ -419,6 +434,21 @@ mod tests {
             [
                 "[1, 2, 3]",
                 &Object::Array(vec![Object::Int(1), Object::Int(2), Object::Int(3)])
+            ],
+        );
+    }
+
+    #[test]
+    fn can_eval_hashmap_exprs() {
+        vm_test!(
+            ["{}", &Object::HashMap(HashMap::new())],
+            [
+                "{1: 2, 3: 4, \"hello\": 3 * 3}",
+                &Object::HashMap(HashMap::from_iter([
+                    (Object::Int(1), Object::Int(2)),
+                    (Object::Int(3), Object::Int(4)),
+                    (Object::String("hello".to_owned()), Object::Int(9))
+                ]))
             ],
         );
     }

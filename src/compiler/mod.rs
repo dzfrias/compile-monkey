@@ -168,6 +168,14 @@ impl Compiler {
                 }
                 self.emit(OpCode::Array, vec![arr.len() as u32]);
             }
+            Expr::HashLiteral(key_vals) => {
+                for (key, val) in key_vals {
+                    self.compile_expr(key);
+                    self.compile_expr(val);
+                }
+                let total_len = key_vals.len() * 2;
+                self.emit(OpCode::HashMap, vec![total_len as u32]);
+            }
             Expr::If {
                 condition,
                 consequence,
@@ -541,6 +549,40 @@ mod tests {
                         (Constant, [1]),
                         (Constant, [2]),
                         (Array, [3]),
+                        (Pop),
+                    ]
+                }
+            ],
+        );
+    }
+
+    #[test]
+    fn hashmap_literals() {
+        compiler_tests!(
+            [
+                "{}",
+                {
+                    constants: [],
+                    instrs: [
+                        (HashMap, [0]),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "{1: 2, 3: 4, 5: 6 + 7}",
+                {
+                    constants: [Object::Int(1), Object::Int(2), Object::Int(3), Object::Int(4), Object::Int(5), Object::Int(6), Object::Int(7)],
+                    instrs: [
+                        (Constant, [0]),
+                        (Constant, [1]),
+                        (Constant, [2]),
+                        (Constant, [3]),
+                        (Constant, [4]),
+                        (Constant, [5]),
+                        (Constant, [6]),
+                        (Add),
+                        (HashMap, [6]),
                         (Pop),
                     ]
                 }
