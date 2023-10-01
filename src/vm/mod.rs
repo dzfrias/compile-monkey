@@ -124,6 +124,15 @@ impl Vm {
                     let global = self.state.globals.borrow_mut()[global_index].clone();
                     self.stack.push(global);
                 }
+                OpCode::Array => {
+                    let len = self.read_u16(ip + 1) as usize;
+                    ip += 2;
+                    let mut elems = vec![NULL; len];
+                    for i in 1..=len {
+                        elems[len - i] = self.stack.pop().unwrap();
+                    }
+                    self.stack.push(Object::Array(elems))
+                }
             }
 
             ip += 1;
@@ -400,6 +409,17 @@ mod tests {
         vm_test!(
             ["\"hello\"", &Object::String("hello".to_owned())],
             ["\"mon\" + \"key\"", &Object::String("monkey".to_owned())],
+        );
+    }
+
+    #[test]
+    fn can_eval_array_exprs() {
+        vm_test!(
+            ["[]", &Object::Array(vec![])],
+            [
+                "[1, 2, 3]",
+                &Object::Array(vec![Object::Int(1), Object::Int(2), Object::Int(3)])
+            ],
         );
     }
 }

@@ -147,6 +147,8 @@ pub enum OpCode {
     SetGlobal,
     /// Get a global variable with the corresponding id [u16]
     GetGlobal,
+    /// Initialize a new array with N elements [N: u16]
+    Array,
 }
 
 #[derive(Debug, Clone)]
@@ -195,6 +197,7 @@ impl OpCode {
             Null: [],
             SetGlobal: [OpWidth::HalfWord],
             GetGlobal: [OpWidth::HalfWord],
+            Array: [OpWidth::HalfWord],
         )
     }
 }

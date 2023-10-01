@@ -162,6 +162,12 @@ impl Compiler {
                 };
                 self.emit(opcode, vec![]);
             }
+            Expr::ArrayLiteral(arr) => {
+                for elem in arr {
+                    self.compile_expr(elem);
+                }
+                self.emit(OpCode::Array, vec![arr.len() as u32]);
+            }
             Expr::If {
                 condition,
                 consequence,
@@ -506,6 +512,35 @@ mod tests {
                         (Constant, [0]),
                         (Constant, [1]),
                         (Add),
+                        (Pop),
+                    ]
+                }
+            ],
+        );
+    }
+
+    #[test]
+    fn array_literals() {
+        compiler_tests!(
+            [
+                "[]",
+                {
+                    constants: [],
+                    instrs: [
+                        (Array, [0]),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "[1, 2, 3]",
+                {
+                    constants: [Object::Int(1), Object::Int(2), Object::Int(3)],
+                    instrs: [
+                        (Constant, [0]),
+                        (Constant, [1]),
+                        (Constant, [2]),
+                        (Array, [3]),
                         (Pop),
                     ]
                 }
