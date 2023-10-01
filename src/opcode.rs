@@ -1,4 +1,4 @@
-#![allow(dead_code, non_upper_case_globals)]
+#![allow(non_upper_case_globals)]
 
 use std::fmt;
 
@@ -38,26 +38,12 @@ impl Instruction {
         Self(instr)
     }
 
-    pub fn opcode(&self) -> OpCode {
-        let byte = self.0[0];
-        match OpCode::try_from(byte) {
-            Ok(op) => op,
-            Err(_) => {
-                panic!("BUG: instruction should never be constructed with invalid opcode");
-            }
-        }
-    }
-
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 }
 
 impl Instructions {
-    pub fn new() -> Self {
-        Self(vec![])
-    }
-
     pub fn add(&mut self, instr: Instruction) {
         self.0.extend_from_slice(instr.as_bytes());
     }
@@ -157,6 +143,10 @@ pub enum OpCode {
     JumpNotTruthy,
     /// Push the null object onto the stack.
     Null,
+    /// Set a global variable to the top of the stack [u16]
+    SetGlobal,
+    /// Get a global variable with the corresponding id [u16]
+    GetGlobal,
 }
 
 #[derive(Debug, Clone)]
@@ -203,6 +193,8 @@ impl OpCode {
             Jump: [OpWidth::HalfWord],
             JumpNotTruthy: [OpWidth::HalfWord],
             Null: [],
+            SetGlobal: [OpWidth::HalfWord],
+            GetGlobal: [OpWidth::HalfWord],
         )
     }
 }

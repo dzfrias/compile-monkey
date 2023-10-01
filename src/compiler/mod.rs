@@ -1,3 +1,5 @@
+mod symbol_table;
+
 use num_enum::TryFromPrimitive;
 
 use crate::{
@@ -5,11 +7,13 @@ use crate::{
     object::Object,
     opcode::{Instruction, Instructions, OpCode},
 };
+pub use symbol_table::SymbolTable;
 
 #[derive(Debug)]
 pub struct Compiler {
     instrs: Instructions,
     constants: Vec<Object>,
+    symbol_table: SymbolTable,
 
     last_opcode: OpCode,
     prev_opcode: OpCode,
@@ -26,18 +30,30 @@ impl Compiler {
         Self {
             instrs: Instructions::default(),
             constants: vec![],
+            symbol_table: SymbolTable::new(),
 
             last_opcode: OpCode::Add,
             prev_opcode: OpCode::Add,
         }
     }
 
-    pub fn compile(mut self, program: Program) -> Bytecode {
-        self.compile_block(&(program as Block));
-        Bytecode {
-            instrs: self.instrs,
-            constants: self.constants,
+    pub fn new_with_state(symbol_table: SymbolTable, constants: Vec<Object>) -> Self {
+        Self {
+            symbol_table,
+            constants,
+            ..Self::new()
         }
+    }
+
+    pub fn compile(mut self, program: Program) -> (Bytecode, SymbolTable) {
+        self.compile_block(&(program as Block));
+        (
+            Bytecode {
+                instrs: self.instrs,
+                constants: self.constants,
+            },
+            self.symbol_table,
+        )
     }
 
     fn emit(&mut self, opcode: OpCode, operands: Vec<u32>) {
@@ -69,6 +85,12 @@ impl Compiler {
             Stmt::Expr(expr) => {
                 self.compile_expr(expr);
                 self.emit(OpCode::Pop, vec![]);
+            }
+            Stmt::Let { ident, expr } => {
+                self.compile_expr(expr);
+                let symbol = self.symbol_table.define(&ident.0);
+                let index = symbol.index;
+                self.emit(OpCode::SetGlobal, vec![index]);
             }
             stmt => todo!("compile stmt for: {stmt}"),
         }
@@ -155,6 +177,12 @@ impl Compiler {
                 // (after alt)
                 self.change_operand(cons_jump_pos, self.current_position() as u32);
             }
+            Expr::Identifier(ident) => {
+                // TODO: error handling, make CompilerError
+                let symbol = self.symbol_table.resolve(&ident.0).unwrap();
+                let index = symbol.index;
+                self.emit(OpCode::GetGlobal, vec![index])
+            }
             expr => todo!("compile expr for: {expr}"),
         }
     }
@@ -170,9 +198,12 @@ mod tests {
     use super::*;
 
     macro_rules! assert_instrs {
-        ($expect:expr, $got:expr) => {
+        ($expect:expr, $got:expr, $input:expr) => {
             if $expect != $got {
-                panic!("invalid instructions expected: {}, got: {}", $expect, $got);
+                panic!(
+                    "invalid instructions expected: {}, got: {}, with input: {}",
+                    $expect, $got, $input
+                );
             }
         };
     }
@@ -186,7 +217,7 @@ mod tests {
                     .parse_program()
                     .expect("input should have no parse errors");
                 let compiler = Compiler::new();
-                let bytecode = compiler.compile(program);
+                let bytecode = compiler.compile(program).0;
                 let expect = Bytecode {
                     constants: $consts.into(),
                     instrs: Instructions::from_iter([
@@ -195,7 +226,7 @@ mod tests {
                          )*
                     ]),
                 };
-                assert_instrs!(expect.instrs, bytecode.instrs);
+                assert_instrs!(expect.instrs, bytecode.instrs, $input);
                 assert_eq!(expect.constants, bytecode.constants, "invalid constant pool for input {}", $input);
              )+
         };
@@ -396,6 +427,36 @@ mod tests {
                         (Pop), // 0013
 
                         (Constant, [2]),
+                        (Pop),
+                    ]
+                }
+            ],
+        );
+    }
+
+    #[test]
+    fn bindings() {
+        compiler_tests!(
+            [
+                "let one = 1; let two = 2;",
+                {
+                    constants: [Object::Int(1), Object::Int(2)],
+                    instrs: [
+                        (Constant, [0]),
+                        (SetGlobal, [0]),
+                        (Constant, [1]),
+                        (SetGlobal, [1]),
+                    ]
+                }
+            ],
+            [
+                "let one = 1; one",
+                {
+                    constants: [Object::Int(1)],
+                    instrs: [
+                        (Constant, [0]),
+                        (SetGlobal, [0]),
+                        (GetGlobal, [0]),
                         (Pop),
                     ]
                 }

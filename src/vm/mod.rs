@@ -9,11 +9,13 @@ use crate::{
 };
 
 const STACK_SIZE: usize = 2048;
+const GLOBALS_SIZE: usize = u16::MAX as usize;
 
 #[derive(Debug)]
 pub struct Vm {
     instructions: Instructions,
     constants: Vec<Object>,
+    pub globals: Vec<Object>,
 
     stack: Vec<Object>,
     last_popped: Option<Object>,
@@ -25,6 +27,7 @@ impl Vm {
         Self {
             instructions: instrs,
             constants,
+            globals: vec![NULL; GLOBALS_SIZE],
             stack: Vec::with_capacity(STACK_SIZE),
             sp: 0,
             last_popped: None,
@@ -77,6 +80,18 @@ impl Vm {
                     }
                 }
                 OpCode::Null => self.push(NULL)?,
+                OpCode::SetGlobal => {
+                    let global_index = self.read_u16(ip + 1) as usize;
+                    ip += 2;
+                    self.globals[global_index] = self
+                        .pop()
+                        .expect("should never set global with nothing on the stack");
+                }
+                OpCode::GetGlobal => {
+                    let global_index = self.read_u16(ip + 1) as usize;
+                    ip += 2;
+                    self.stack.push(self.globals[global_index].clone());
+                }
             }
 
             ip += 1;
@@ -259,7 +274,7 @@ mod tests {
                 let parser = Parser::new(lexer);
                 let prog = parser.parse_program().unwrap();
                 let compiler = Compiler::new();
-                let bytecode = compiler.compile(prog);
+                let bytecode = compiler.compile(prog).0;
                 let mut vm = Vm::new(bytecode);
                 vm.run().expect("vm should run with no errors");
                 let stack_top = vm.last_popped().unwrap();
@@ -316,6 +331,14 @@ mod tests {
             ["if (false) { 10 } else { 20 }", &Object::Int(20)],
             ["if (1 < 2) { 10 } else { 20 }", &Object::Int(10)],
             ["if (false) { 10 }", &Object::Null],
+        );
+    }
+
+    #[test]
+    fn can_eval_variable_bindings() {
+        vm_test!(
+            ["let one = 1; one", &Object::Int(1)],
+            ["let one = 1; let two = 2; one + two", &Object::Int(3)],
         );
     }
 }
