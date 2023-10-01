@@ -19,12 +19,6 @@ pub struct SymbolTable {
 }
 
 impl SymbolTable {
-    pub fn new() -> Self {
-        Self {
-            symbols: HashMap::new(),
-        }
-    }
-
     pub fn define(&mut self, name: &str) -> &Symbol {
         let name = SmolStr::new(name);
         let symbol = Symbol {

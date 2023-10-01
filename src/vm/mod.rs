@@ -1,5 +1,7 @@
 pub mod error;
 
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{
     compiler::Bytecode,
     frontend::ast::{InfixOp, PrefixOp},
@@ -11,11 +13,28 @@ use crate::{
 const STACK_SIZE: usize = 2048;
 const GLOBALS_SIZE: usize = u16::MAX as usize;
 
+/// Opaque type representing potential global state of the vm. The only way it can be created is
+/// with State::default().
+///
+/// Cheap to clone.
+#[derive(Debug, Clone)]
+pub struct State {
+    globals: Rc<RefCell<Vec<Object>>>,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            globals: Rc::new(RefCell::new(vec![NULL; GLOBALS_SIZE])),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Vm {
     instructions: Instructions,
     constants: Vec<Object>,
-    pub globals: Vec<Object>,
+    state: State,
 
     stack: Vec<Object>,
     last_popped: Option<Object>,
@@ -27,10 +46,17 @@ impl Vm {
         Self {
             instructions: instrs,
             constants,
-            globals: vec![NULL; GLOBALS_SIZE],
+            state: State::default(),
             stack: Vec::with_capacity(STACK_SIZE),
             sp: 0,
             last_popped: None,
+        }
+    }
+
+    pub fn new_with_state(bytecode: Bytecode, state: State) -> Self {
+        Self {
+            state,
+            ..Self::new(bytecode)
         }
     }
 
@@ -83,14 +109,15 @@ impl Vm {
                 OpCode::SetGlobal => {
                     let global_index = self.read_u16(ip + 1) as usize;
                     ip += 2;
-                    self.globals[global_index] = self
+                    self.state.globals.borrow_mut()[global_index] = self
                         .pop()
                         .expect("should never set global with nothing on the stack");
                 }
                 OpCode::GetGlobal => {
                     let global_index = self.read_u16(ip + 1) as usize;
                     ip += 2;
-                    self.stack.push(self.globals[global_index].clone());
+                    let global = self.state.globals.borrow_mut()[global_index].clone();
+                    self.stack.push(global);
                 }
             }
 
@@ -274,7 +301,7 @@ mod tests {
                 let parser = Parser::new(lexer);
                 let prog = parser.parse_program().unwrap();
                 let compiler = Compiler::new();
-                let bytecode = compiler.compile(prog).0;
+                let bytecode = compiler.compile(prog);
                 let mut vm = Vm::new(bytecode);
                 vm.run().expect("vm should run with no errors");
                 let stack_top = vm.last_popped().unwrap();

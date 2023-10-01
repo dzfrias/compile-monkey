@@ -8,18 +8,16 @@ use anyhow::Result;
 use rustyline::error::ReadlineError;
 
 use crate::{
-    compiler::{Compiler, SymbolTable},
+    compiler::{Compiler, State as CompilerState},
     frontend::{lexer::Lexer, parser::Parser},
-    vm::Vm,
+    vm::{State as VmState, Vm},
 };
 
 fn main() -> Result<()> {
     let mut rl = rustyline::DefaultEditor::new()?;
 
-    let mut symbol_table = SymbolTable::new();
-    let mut constants = vec![];
-    // TODO: no longer initialize memory like this. Should panic on invalid access
-    let mut globals = vec![object::NULL; u16::MAX as usize];
+    let compiler_state = CompilerState::default();
+    let vm_state = VmState::default();
 
     loop {
         let readline = rl.readline(">> ");
@@ -29,22 +27,14 @@ fn main() -> Result<()> {
                 let lexer = Lexer::new(&line);
                 let parser = Parser::new(lexer);
                 let program = parser.parse_program().unwrap();
-                let compiler = Compiler::new_with_state(symbol_table.clone(), constants.clone());
-                let (bytecode, sym_tbl) = compiler.compile(program);
-                // TODO: Wrap this in a compiler::State type that uses Rc<RefCell<_>> for this
-                // global mutable data. The cloning here is potentially expensive. Also, messing
-                // with the return value of compiler.compile() is not great.
-                symbol_table = sym_tbl;
-                constants = bytecode.constants.clone();
-                let mut vm = Vm::new(bytecode);
-                // TODO: same as above
-                vm.globals = globals.clone();
+                let compiler = Compiler::new_with_state(compiler_state.clone());
+                let bytecode = compiler.compile(program);
+                let mut vm = Vm::new_with_state(bytecode, vm_state.clone());
                 if let Err(err) = vm.run() {
                     eprintln!("{err}");
                 } else if let Some(top) = vm.last_popped() {
                     println!("{top}")
                 }
-                globals = vm.globals;
                 println!()
             }
             Err(ReadlineError::Eof) => break,

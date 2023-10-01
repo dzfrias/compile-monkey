@@ -1,5 +1,7 @@
 mod symbol_table;
 
+use std::{cell::RefCell, rc::Rc};
+
 use num_enum::TryFromPrimitive;
 
 use crate::{
@@ -9,11 +11,20 @@ use crate::{
 };
 pub use symbol_table::SymbolTable;
 
+/// Opaque type representing potential global state of the compiler. The only way it can be created
+/// is with State::default().
+///
+/// Cheap to clone.
+#[derive(Debug, Clone, Default)]
+pub struct State {
+    symbol_table: Rc<RefCell<SymbolTable>>,
+    constants: Rc<RefCell<Vec<Object>>>,
+}
+
 #[derive(Debug)]
 pub struct Compiler {
     instrs: Instructions,
-    constants: Vec<Object>,
-    symbol_table: SymbolTable,
+    state: State,
 
     last_opcode: OpCode,
     prev_opcode: OpCode,
@@ -29,31 +40,28 @@ impl Compiler {
     pub fn new() -> Self {
         Self {
             instrs: Instructions::default(),
-            constants: vec![],
-            symbol_table: SymbolTable::new(),
+            state: State::default(),
 
             last_opcode: OpCode::Add,
             prev_opcode: OpCode::Add,
         }
     }
 
-    pub fn new_with_state(symbol_table: SymbolTable, constants: Vec<Object>) -> Self {
+    pub fn new_with_state(state: State) -> Self {
         Self {
-            symbol_table,
-            constants,
+            state,
             ..Self::new()
         }
     }
 
-    pub fn compile(mut self, program: Program) -> (Bytecode, SymbolTable) {
+    pub fn compile(mut self, program: Program) -> Bytecode {
         self.compile_block(&(program as Block));
-        (
-            Bytecode {
-                instrs: self.instrs,
-                constants: self.constants,
-            },
-            self.symbol_table,
-        )
+        // Roundabout way of cloning the inner value of the Rc<RefCell<_>>
+        let constants = self.state.constants.borrow().iter().cloned().collect();
+        Bytecode {
+            instrs: self.instrs,
+            constants,
+        }
     }
 
     fn emit(&mut self, opcode: OpCode, operands: Vec<u32>) {
@@ -88,8 +96,11 @@ impl Compiler {
             }
             Stmt::Let { ident, expr } => {
                 self.compile_expr(expr);
-                let symbol = self.symbol_table.define(&ident.0);
-                let index = symbol.index;
+                let index = {
+                    let mut table = self.state.symbol_table.borrow_mut();
+                    let symbol = table.define(&ident.0);
+                    symbol.index
+                };
                 self.emit(OpCode::SetGlobal, vec![index]);
             }
             stmt => todo!("compile stmt for: {stmt}"),
@@ -134,8 +145,9 @@ impl Compiler {
             }
             Expr::IntegerLiteral(int) => {
                 let obj = Object::Int(*int);
-                self.constants.push(obj);
-                self.emit(OpCode::Constant, vec![(self.constants.len() - 1) as u32]);
+                self.state.constants.borrow_mut().push(obj);
+                let len = self.state.constants.borrow().len();
+                self.emit(OpCode::Constant, vec![(len - 1) as u32]);
             }
             Expr::BooleanLiteral(bool) => {
                 let opcode = match bool {
@@ -179,8 +191,11 @@ impl Compiler {
             }
             Expr::Identifier(ident) => {
                 // TODO: error handling, make CompilerError
-                let symbol = self.symbol_table.resolve(&ident.0).unwrap();
-                let index = symbol.index;
+                let index = {
+                    let table = &self.state.symbol_table.borrow();
+                    let symbol = table.resolve(&ident.0).unwrap();
+                    symbol.index
+                };
                 self.emit(OpCode::GetGlobal, vec![index])
             }
             expr => todo!("compile expr for: {expr}"),
@@ -217,7 +232,7 @@ mod tests {
                     .parse_program()
                     .expect("input should have no parse errors");
                 let compiler = Compiler::new();
-                let bytecode = compiler.compile(program).0;
+                let bytecode = compiler.compile(program);
                 let expect = Bytecode {
                     constants: $consts.into(),
                     instrs: Instructions::from_iter([
