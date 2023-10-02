@@ -151,6 +151,8 @@ pub enum OpCode {
     Array,
     /// Initialize a new hashmap with N / 2 key-value pairs [N: u16]
     HashMap,
+    /// Index the second object on the stack with the first object on the stack
+    Index,
 }
 
 #[derive(Debug, Clone)]
@@ -201,6 +203,7 @@ impl OpCode {
             GetGlobal: [OpWidth::HalfWord],
             Array: [OpWidth::HalfWord],
             HashMap: [OpWidth::HalfWord],
+            Index: [],
         )
     }
 }

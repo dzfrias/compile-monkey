@@ -146,6 +146,11 @@ impl Vm {
                     }
                     self.stack.push(Object::HashMap(hashmap))
                 }
+                OpCode::Index => {
+                    let index = self.pop().unwrap();
+                    let expr = self.pop().unwrap();
+                    self.execute_index_expr(expr, index)?;
+                }
             }
 
             ip += 1;
@@ -302,6 +307,25 @@ impl Vm {
         Ok(())
     }
 
+    fn execute_index_expr(&mut self, expr: Object, index: Object) -> Result<()> {
+        let obj = match (expr, index) {
+            (Object::Array(arr), Object::Int(i)) => arr
+                .get(i as usize)
+                .ok_or(RuntimeError::IndexOutOfRange)?
+                .clone(),
+            (Object::HashMap(hashmap), obj) => hashmap.get(&obj).unwrap_or(&NULL).clone(),
+            (lhs, rhs) => {
+                return Err(RuntimeError::IndexNotSupported {
+                    lhs: lhs.monkey_type(),
+                    rhs: rhs.monkey_type(),
+                })
+            }
+        };
+        self.push(obj)?;
+
+        Ok(())
+    }
+
     fn read_u16(&self, start: usize) -> u16 {
         let bytes: [u8; 2] = self.instructions.as_bytes()[start..start + 2]
             .try_into()
@@ -450,6 +474,14 @@ mod tests {
                     (Object::String("hello".to_owned()), Object::Int(9))
                 ]))
             ],
+        );
+    }
+
+    #[test]
+    fn can_eval_index_exprs() {
+        vm_test!(
+            ["[1, 2, 3][1]", &Object::Int(2)],
+            ["{1: 2, 3: 4, \"hello\": 3 * 3}[3]", &Object::Int(4)],
         );
     }
 }

@@ -218,6 +218,11 @@ impl Compiler {
                 };
                 self.emit(OpCode::GetGlobal, vec![index])
             }
+            Expr::Index { expr, index } => {
+                self.compile_expr(expr);
+                self.compile_expr(index);
+                self.emit(OpCode::Index, vec![]);
+            }
             expr => todo!("compile expr for: {expr}"),
         }
     }
@@ -583,6 +588,45 @@ mod tests {
                         (Constant, [6]),
                         (Add),
                         (HashMap, [6]),
+                        (Pop),
+                    ]
+                }
+            ],
+        );
+    }
+
+    #[test]
+    fn index_exprs() {
+        compiler_tests!(
+            [
+                "[1, 2, 3][1 + 1]",
+                {
+                    constants: [Object::Int(1), Object::Int(2), Object::Int(3), Object::Int(1), Object::Int(1)],
+                    instrs: [
+                        (Constant, [0]),
+                        (Constant, [1]),
+                        (Constant, [2]),
+                        (Array, [3]),
+                        (Constant, [3]),
+                        (Constant, [4]),
+                        (Add),
+                        (Index),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "{1: 2}[2 - 1]",
+                {
+                    constants: [Object::Int(1), Object::Int(2), Object::Int(2), Object::Int(1)],
+                    instrs: [
+                        (Constant, [0]),
+                        (Constant, [1]),
+                        (HashMap, [2]),
+                        (Constant, [2]),
+                        (Constant, [3]),
+                        (Sub),
+                        (Index),
                         (Pop),
                     ]
                 }

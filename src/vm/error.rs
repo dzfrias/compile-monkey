@@ -17,4 +17,8 @@ pub enum RuntimeError {
     StackOverflow,
     #[error("integer overflow")]
     IntegerOverflow,
+    #[error("cannot index {lhs} with {rhs}")]
+    IndexNotSupported { lhs: Type, rhs: Type },
+    #[error("array index out of range")]
+    IndexOutOfRange,
 }
