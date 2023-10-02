@@ -1,3 +1,4 @@
+mod error;
 mod symbol_table;
 
 use std::{cell::RefCell, rc::Rc};
@@ -9,7 +10,8 @@ use crate::{
     object::Object,
     opcode::{Instruction, Instructions, OpCode},
 };
-pub use symbol_table::SymbolTable;
+pub use error::{CompilerError, Result};
+use symbol_table::SymbolTable;
 
 /// Opaque type representing potential global state of the compiler. The only way it can be created
 /// is with State::default().
@@ -54,14 +56,15 @@ impl Compiler {
         }
     }
 
-    pub fn compile(mut self, program: Program) -> Bytecode {
-        self.compile_block(&(program as Block));
+    pub fn compile(mut self, program: Program) -> Result<Bytecode> {
+        self.compile_block(&(program as Block))?;
         // Roundabout way of cloning the inner value of the Rc<RefCell<_>>
         let constants = self.state.constants.borrow().iter().cloned().collect();
-        Bytecode {
+
+        Ok(Bytecode {
             instrs: self.instrs,
             constants,
-        }
+        })
     }
 
     fn emit(&mut self, opcode: OpCode, operands: Vec<u32>) {
@@ -82,20 +85,22 @@ impl Compiler {
         self.instrs.replace_instr(pos, new_instr);
     }
 
-    fn compile_block(&mut self, block: &Block) {
+    fn compile_block(&mut self, block: &Block) -> Result<()> {
         for stmt in &block.0 {
-            self.compile_stmt(stmt);
+            self.compile_stmt(stmt)?;
         }
+
+        Ok(())
     }
 
-    fn compile_stmt(&mut self, stmt: &Stmt) {
+    fn compile_stmt(&mut self, stmt: &Stmt) -> Result<()> {
         match stmt {
             Stmt::Expr(expr) => {
-                self.compile_expr(expr);
+                self.compile_expr(expr)?;
                 self.emit(OpCode::Pop, vec![]);
             }
             Stmt::Let { ident, expr } => {
-                self.compile_expr(expr);
+                self.compile_expr(expr)?;
                 let index = {
                     let mut table = self.state.symbol_table.borrow_mut();
                     let symbol = table.define(&ident.0);
@@ -105,21 +110,23 @@ impl Compiler {
             }
             stmt => todo!("compile stmt for: {stmt}"),
         }
+
+        Ok(())
     }
 
     fn current_position(&self) -> usize {
         self.instrs.as_bytes().len()
     }
 
-    fn compile_expr(&mut self, expr: &Expr) {
+    fn compile_expr(&mut self, expr: &Expr) -> Result<()> {
         match expr {
             Expr::Infix { left, op, right } => {
                 if *op == InfixOp::Lt {
-                    self.compile_expr(&right);
-                    self.compile_expr(&left);
+                    self.compile_expr(&right)?;
+                    self.compile_expr(&left)?;
                 } else {
-                    self.compile_expr(&left);
-                    self.compile_expr(&right);
+                    self.compile_expr(&left)?;
+                    self.compile_expr(&right)?;
                 }
                 let opcode = match op {
                     InfixOp::Plus => OpCode::Add,
@@ -135,11 +142,11 @@ impl Compiler {
                 self.emit(opcode, vec![]);
             }
             Expr::Prefix { op, expr } => {
-                self.compile_expr(expr);
+                self.compile_expr(expr)?;
                 let opcode = match op {
                     PrefixOp::Bang => OpCode::Bang,
                     PrefixOp::Minus => OpCode::Minus,
-                    PrefixOp::Plus => return,
+                    PrefixOp::Plus => return Ok(()),
                 };
                 self.emit(opcode, vec![]);
             }
@@ -164,14 +171,14 @@ impl Compiler {
             }
             Expr::ArrayLiteral(arr) => {
                 for elem in arr {
-                    self.compile_expr(elem);
+                    self.compile_expr(elem)?;
                 }
                 self.emit(OpCode::Array, vec![arr.len() as u32]);
             }
             Expr::HashLiteral(key_vals) => {
                 for (key, val) in key_vals {
-                    self.compile_expr(key);
-                    self.compile_expr(val);
+                    self.compile_expr(key)?;
+                    self.compile_expr(val)?;
                 }
                 let total_len = key_vals.len() * 2;
                 self.emit(OpCode::HashMap, vec![total_len as u32]);
@@ -181,10 +188,10 @@ impl Compiler {
                 consequence,
                 alternative,
             } => {
-                self.compile_expr(condition);
+                self.compile_expr(condition)?;
                 let jump_pos = self.current_position();
                 self.emit(OpCode::JumpNotTruthy, vec![9999]);
-                self.compile_block(consequence);
+                self.compile_block(consequence)?;
                 if self.last_opcode == OpCode::Pop {
                     self.instrs.pop();
                     self.last_opcode = self.prev_opcode;
@@ -197,7 +204,7 @@ impl Compiler {
                 // consequence
                 self.change_operand(jump_pos, self.current_position() as u32);
                 if let Some(alt) = alternative {
-                    self.compile_block(alt);
+                    self.compile_block(alt)?;
                 } else {
                     self.emit(OpCode::Null, vec![]);
                 }
@@ -213,18 +220,27 @@ impl Compiler {
                 // TODO: error handling, make CompilerError
                 let index = {
                     let table = &self.state.symbol_table.borrow();
-                    let symbol = table.resolve(&ident.0).unwrap();
-                    symbol.index
+                    let symbol = table.resolve(&ident.0);
+                    match symbol {
+                        Some(sym) => sym.index,
+                        None => {
+                            return Err(CompilerError::UnboundVariable {
+                                name: ident.0.clone(),
+                            })
+                        }
+                    }
                 };
                 self.emit(OpCode::GetGlobal, vec![index])
             }
             Expr::Index { expr, index } => {
-                self.compile_expr(expr);
-                self.compile_expr(index);
+                self.compile_expr(expr)?;
+                self.compile_expr(index)?;
                 self.emit(OpCode::Index, vec![]);
             }
             expr => todo!("compile expr for: {expr}"),
         }
+
+        Ok(())
     }
 }
 
@@ -257,7 +273,7 @@ mod tests {
                     .parse_program()
                     .expect("input should have no parse errors");
                 let compiler = Compiler::new();
-                let bytecode = compiler.compile(program);
+                let bytecode = compiler.compile(program).expect("should compile with no errors");
                 let expect = Bytecode {
                     constants: $consts.into(),
                     instrs: Instructions::from_iter([

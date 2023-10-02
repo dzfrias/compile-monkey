@@ -28,7 +28,13 @@ fn main() -> Result<()> {
                 let parser = Parser::new(lexer);
                 let program = parser.parse_program().unwrap();
                 let compiler = Compiler::new_with_state(compiler_state.clone());
-                let bytecode = compiler.compile(program);
+                let bytecode = match compiler.compile(program) {
+                    Ok(bytes) => bytes,
+                    Err(err) => {
+                        eprintln!("{err}\n");
+                        continue;
+                    }
+                };
                 let mut vm = Vm::new_with_state(bytecode, vm_state.clone());
                 if let Err(err) = vm.run() {
                     eprintln!("{err}");

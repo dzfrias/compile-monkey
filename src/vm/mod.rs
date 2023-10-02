@@ -375,7 +375,7 @@ mod tests {
                 let parser = Parser::new(lexer);
                 let prog = parser.parse_program().unwrap();
                 let compiler = Compiler::new();
-                let bytecode = compiler.compile(prog);
+                let bytecode = compiler.compile(prog).expect("should compile with no errors");
                 let mut vm = Vm::new(bytecode);
                 vm.run().expect("vm should run with no errors");
                 let stack_top = vm.last_popped().expect("stack should have something last popped");
