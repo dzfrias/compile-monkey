@@ -21,4 +21,8 @@ pub enum RuntimeError {
     IndexNotSupported { lhs: Type, rhs: Type },
     #[error("array index out of range")]
     IndexOutOfRange,
+    #[error("uncallable type: {0}")]
+    UncallableType(Type),
+    #[error("wrong number of arguments provided, got: {got}, expected: {expected}")]
+    WrongArgs { got: u32, expected: u32 },
 }

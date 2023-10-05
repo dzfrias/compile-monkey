@@ -1,4 +1,5 @@
 pub mod error;
+mod frame;
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
@@ -6,10 +7,14 @@ use crate::{
     compiler::Bytecode,
     frontend::ast::{InfixOp, PrefixOp},
     object::{Object, Type, FALSE, NULL, TRUE},
-    opcode::{Instructions, OpCode},
-    vm::error::{Result, RuntimeError},
+    opcode::OpCode,
+    vm::{
+        error::{Result, RuntimeError},
+        frame::Frame,
+    },
 };
 
+const CALLSTACK_SIZE: usize = 1024;
 const STACK_SIZE: usize = 2048;
 const GLOBALS_SIZE: usize = u16::MAX as usize;
 
@@ -32,9 +37,9 @@ impl Default for State {
 
 #[derive(Debug)]
 pub struct Vm {
-    instructions: Instructions,
     constants: Vec<Object>,
     state: State,
+    frames: Vec<Frame>,
 
     stack: Vec<Object>,
     last_popped: Option<Object>,
@@ -43,8 +48,11 @@ pub struct Vm {
 
 impl Vm {
     pub fn new(Bytecode { instrs, constants }: Bytecode) -> Self {
+        let mut frames = Vec::with_capacity(CALLSTACK_SIZE);
+        frames.push(Frame::new(instrs, 0));
+
         Self {
-            instructions: instrs,
+            frames,
             constants,
             state: State::default(),
             stack: Vec::with_capacity(STACK_SIZE),
@@ -61,18 +69,16 @@ impl Vm {
     }
 
     pub fn run(&mut self) -> Result<()> {
-        // The VM's instruction pointer
-        let mut ip = 0;
-        while ip < self.instructions.as_bytes().len() {
-            let op = OpCode::try_from(self.instructions.as_bytes()[ip])
+        while self.current_frame().ip < self.current_frame().instrs.as_bytes().len() {
+            let ip = self.current_frame().ip;
+            let op = OpCode::try_from(self.current_frame().instrs.as_bytes()[ip])
                 .expect("bytecode error: invalid opcode");
 
             match op {
                 OpCode::Constant => {
-                    let idx = self.read_u16(ip + 1);
+                    let idx = self.read_u16();
                     let constant = &self.constants[idx as usize];
                     self.push(constant.clone())?;
-                    ip += 2;
                 }
 
                 OpCode::Add
@@ -92,23 +98,21 @@ impl Vm {
                 OpCode::True => self.push(TRUE)?,
                 OpCode::False => self.push(FALSE)?,
                 OpCode::Jump => {
-                    let pos = self.read_u16(ip + 1);
-                    ip = (pos - 1) as usize
+                    let pos = self.read_u16();
+                    self.current_frame_mut().ip = (pos - 1) as usize;
                 }
                 OpCode::JumpNotTruthy => {
-                    let pos = self.read_u16(ip + 1);
-                    ip += 2;
+                    let pos = self.read_u16();
                     let cond = self
                         .pop()
                         .expect("should never compile jump with nothing on the stack");
                     if !cond.is_truthy() {
-                        ip = (pos - 1) as usize;
+                        self.current_frame_mut().ip = (pos - 1) as usize;
                     }
                 }
                 OpCode::Null => self.push(NULL)?,
                 OpCode::SetGlobal => {
-                    let global_index = self.read_u16(ip + 1) as usize;
-                    ip += 2;
+                    let global_index = self.read_u16() as usize;
                     let obj = self
                         .pop()
                         .expect("should never set global with nothing on the stack");
@@ -119,14 +123,12 @@ impl Vm {
                     }
                 }
                 OpCode::GetGlobal => {
-                    let global_index = self.read_u16(ip + 1) as usize;
-                    ip += 2;
+                    let global_index = self.read_u16() as usize;
                     let global = self.state.globals.borrow_mut()[global_index].clone();
                     self.stack.push(global);
                 }
                 OpCode::Array => {
-                    let len = self.read_u16(ip + 1) as usize;
-                    ip += 2;
+                    let len = self.read_u16() as usize;
                     let mut elems = vec![NULL; len];
                     for i in 1..=len {
                         elems[len - i] = self.stack.pop().unwrap();
@@ -134,8 +136,7 @@ impl Vm {
                     self.stack.push(Object::Array(elems))
                 }
                 OpCode::HashMap => {
-                    let mut kvs = self.read_u16(ip + 1) as usize;
-                    ip += 2;
+                    let mut kvs = self.read_u16() as usize;
                     // kvs contains both the amount of keys as well as the amount of values
                     let mut hashmap = HashMap::with_capacity(kvs / 2);
                     while kvs > 0 {
@@ -151,9 +152,66 @@ impl Vm {
                     let expr = self.pop().unwrap();
                     self.execute_index_expr(expr, index)?;
                 }
+                OpCode::Call => {
+                    let argnum = self.read_u8() as usize;
+                    let mut args = Vec::with_capacity(argnum);
+                    for _ in 0..argnum {
+                        let arg = self.pop().unwrap();
+                        args.push(arg);
+                    }
+                    args.reverse();
+
+                    let obj = self.pop().unwrap();
+                    let Object::Function(func) = obj else {
+                        return Err(RuntimeError::UncallableType(obj.monkey_type()));
+                    };
+                    self.push_frame(Frame::new(func.instrs, self.sp));
+
+                    if args.len() as u32 != func.num_params {
+                        return Err(RuntimeError::WrongArgs {
+                            expected: func.num_params,
+                            got: args.len() as u32,
+                        });
+                    }
+                    // Push args back onto the stack, as local variables
+                    for arg in args {
+                        self.push(arg)?;
+                    }
+
+                    for _ in 0..func.num_locals {
+                        self.push(NULL)?;
+                    }
+                    self.sp += func.num_locals as usize + argnum;
+                    // continue to not increment with new frame
+                    continue;
+                }
+                OpCode::Ret => {
+                    self.pop_frame();
+                    self.push(NULL)?;
+                }
+                OpCode::RetVal => {
+                    let ret_val = self
+                        .pop()
+                        .expect("should have someting on the stack when returning");
+                    self.pop_frame();
+                    self.push(ret_val)?;
+                }
+                OpCode::SetLocal => {
+                    let local_idx = self.read_u16();
+                    // Get space reserved on the bottom of stack for locals
+                    let bp = self.current_frame().bp;
+                    self.stack[bp + local_idx as usize] = self.pop().unwrap();
+                }
+                OpCode::GetLocal => {
+                    let local_idx = self.read_u16();
+                    // Get space reserved on the bottom of stack for locals
+                    let bp = self.current_frame().bp;
+                    let obj = self.stack[bp + local_idx as usize].clone();
+                    self.push(obj)?;
+                }
             }
 
-            ip += 1;
+            self.current_frame_mut().ip += 1;
         }
 
         Ok(())
@@ -164,7 +222,30 @@ impl Vm {
     }
 
     fn pop(&mut self) -> Option<Object> {
+        self.sp = self.sp.saturating_sub(1);
         self.stack.pop()
+    }
+
+    fn current_frame(&self) -> &Frame {
+        self.frames
+            .last()
+            .expect("should never have an empty call stack")
+    }
+
+    fn current_frame_mut(&mut self) -> &mut Frame {
+        self.frames
+            .last_mut()
+            .expect("should never have an empty call stack")
+    }
+
+    fn push_frame(&mut self, frame: Frame) {
+        self.frames.push(frame);
+    }
+
+    fn pop_frame(&mut self) -> Frame {
+        self.frames
+            .pop()
+            .expect("should never have an empty call stack")
     }
 
     fn push(&mut self, obj: Object) -> Result<()> {
@@ -173,6 +254,7 @@ impl Vm {
         }
 
         self.stack.push(obj);
+        self.sp += 1;
 
         Ok(())
     }
@@ -326,11 +408,22 @@ impl Vm {
         Ok(())
     }
 
-    fn read_u16(&self, start: usize) -> u16 {
-        let bytes: [u8; 2] = self.instructions.as_bytes()[start..start + 2]
+    fn read_u16(&mut self) -> u16 {
+        let start = self.current_frame().ip + 1;
+        let bytes: [u8; 2] = self.current_frame().instrs.as_bytes()[start..start + 2]
             .try_into()
             .expect("should be two bytes long");
+        self.current_frame_mut().ip += 2;
         u16::from_be_bytes(bytes)
+    }
+
+    fn read_u8(&mut self) -> u8 {
+        let start = self.current_frame().ip + 1;
+        let bytes: [u8; 1] = self.current_frame().instrs.as_bytes()[start..start + 1]
+            .try_into()
+            .expect("should be one byte long");
+        self.current_frame_mut().ip += 1;
+        u8::from_be_bytes(bytes)
     }
 }
 
@@ -482,6 +575,32 @@ mod tests {
         vm_test!(
             ["[1, 2, 3][1]", &Object::Int(2)],
             ["{1: 2, 3: 4, \"hello\": 3 * 3}[3]", &Object::Int(4)],
+        );
+    }
+
+    #[test]
+    fn can_eval_call_exprs() {
+        vm_test!(
+            ["let func = fn() { 10 + 5 }; func()", &Object::Int(15)],
+            ["let func = fn() {}; func()", &Object::Null],
+            [
+                "let func = fn(x, y) { let z = 1; x - y + z }; func(1, 2)",
+                &Object::Int(0)
+            ],
+        );
+    }
+
+    #[test]
+    fn can_eval_functions_with_local_bindings() {
+        vm_test!(
+            [
+                "let one = fn() { let one = 1; one }; one()",
+                &Object::Int(1)
+            ],
+            [
+                "let one = 1; let three = fn() { return one + 2 }; three()",
+                &Object::Int(3)
+            ],
         );
     }
 }

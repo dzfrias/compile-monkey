@@ -16,8 +16,8 @@ use crate::{
 fn main() -> Result<()> {
     let mut rl = rustyline::DefaultEditor::new()?;
 
-    let compiler_state = CompilerState::default();
-    let vm_state = VmState::default();
+    let mut compiler_state = CompilerState::default();
+    let mut vm_state = VmState::default();
 
     loop {
         let readline = rl.readline(">> ");
@@ -31,6 +31,9 @@ fn main() -> Result<()> {
                 let bytecode = match compiler.compile(program) {
                     Ok(bytes) => bytes,
                     Err(err) => {
+                        // Reset state
+                        compiler_state = CompilerState::default();
+                        vm_state = VmState::default();
                         eprintln!("{err}\n");
                         continue;
                     }

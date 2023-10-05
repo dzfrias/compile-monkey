@@ -2,13 +2,11 @@
 
 mod env;
 
-use crate::frontend::ast::*;
+use crate::opcode::Instructions;
 use std::{
-    cell::RefCell,
     collections::{HashMap, HashSet},
     fmt,
     hash::Hash,
-    rc::Rc,
 };
 
 pub use env::Env;
@@ -26,11 +24,7 @@ pub enum Object {
     HashMap(HashMap<Object, Object>),
     Null,
     ReturnVal(Box<Object>),
-    Function {
-        params: Vec<Identifier>,
-        body: Block,
-        env: Rc<RefCell<Env>>,
-    },
+    Function(Function),
     Builtin,
 }
 
@@ -69,19 +63,7 @@ impl fmt::Display for Object {
             Self::ReturnVal(obj) => write!(f, "{}", *obj),
             Self::Null => write!(f, "null"),
             Self::String(s) => write!(f, "\"{s}\""),
-            Self::Function { params, body, .. } => {
-                let joined = params
-                    .iter()
-                    .map(|ident| ident.to_string() + ", ")
-                    .collect::<String>();
-                write!(
-                    f,
-                    "fn({}) {{\n {body} \n}}",
-                    joined
-                        .strip_suffix(", ")
-                        .expect("Should always have a trailing ', '")
-                )
-            }
+            Self::Function { .. } => write!(f, "func"),
             Self::Builtin { .. } => write!(f, "[builtin function]"),
             Self::Array(arr) => {
                 let joined = arr
@@ -116,6 +98,13 @@ impl Hash for Object {
             _ => "".hash(state),
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Function {
+    pub instrs: Instructions,
+    pub num_locals: u32,
+    pub num_params: u32,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]

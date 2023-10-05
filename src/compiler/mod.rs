@@ -6,8 +6,9 @@ use std::{cell::RefCell, rc::Rc};
 use num_enum::TryFromPrimitive;
 
 use crate::{
+    compiler::symbol_table::Scope,
     frontend::ast::{Block, Expr, InfixOp, PrefixOp, Program, Stmt},
-    object::Object,
+    object::{Function, Object},
     opcode::{Instruction, Instructions, OpCode},
 };
 pub use error::{CompilerError, Result};
@@ -25,11 +26,9 @@ pub struct State {
 
 #[derive(Debug)]
 pub struct Compiler {
-    instrs: Instructions,
     state: State,
 
-    last_opcode: OpCode,
-    prev_opcode: OpCode,
+    scope_stack: Vec<CompilationScope>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -38,14 +37,18 @@ pub struct Bytecode {
     pub constants: Vec<Object>,
 }
 
+#[derive(Debug, Default)]
+struct CompilationScope {
+    instrs: Instructions,
+    last_opcode: OpCode,
+    prev_opcode: OpCode,
+}
+
 impl Compiler {
     pub fn new() -> Self {
         Self {
-            instrs: Instructions::default(),
             state: State::default(),
-
-            last_opcode: OpCode::Add,
-            prev_opcode: OpCode::Add,
+            scope_stack: vec![CompilationScope::default()],
         }
     }
 
@@ -62,27 +65,64 @@ impl Compiler {
         let constants = self.state.constants.borrow().iter().cloned().collect();
 
         Ok(Bytecode {
-            instrs: self.instrs,
+            instrs: self.pop_scope(),
             constants,
         })
     }
 
+    fn enter_scope(&mut self) {
+        self.scope_stack.push(CompilationScope::default());
+        let old = self.state.symbol_table.replace(SymbolTable::default());
+        self.state
+            .symbol_table
+            .replace(SymbolTable::new_enclosing(old));
+    }
+
+    fn pop_scope(&mut self) -> Instructions {
+        if self.scope_stack.is_empty() {
+            panic!("should not try to pop a scope that doesn't exist");
+        }
+        let mut old = self.state.symbol_table.replace(SymbolTable::default());
+        if let Some(outer) = old.outer {
+            old = *outer;
+        }
+        self.state.symbol_table.replace(old);
+        self.scope_stack
+            .pop()
+            .expect("should have a compilation scope")
+            .instrs
+    }
+
+    fn current_scope_mut(&mut self) -> &mut CompilationScope {
+        self.scope_stack
+            .last_mut()
+            .expect("should have a scope on the stack")
+    }
+
+    fn current_scope(&self) -> &CompilationScope {
+        self.scope_stack
+            .last()
+            .expect("should have a scope on the stack")
+    }
+
     fn emit(&mut self, opcode: OpCode, operands: Vec<u32>) {
         let instr = Instruction::new(opcode, operands);
-        self.instrs.add(instr);
+        self.current_scope_mut().instrs.add(instr);
         self.set_last_instr(opcode)
     }
 
     fn set_last_instr(&mut self, op: OpCode) {
-        self.prev_opcode = self.last_opcode;
-        self.last_opcode = op;
+        let current_scope = self.current_scope_mut();
+        current_scope.prev_opcode = current_scope.last_opcode;
+        current_scope.last_opcode = op;
     }
 
     fn change_operand(&mut self, pos: usize, operand: u32) {
-        let op = OpCode::try_from_primitive(self.instrs.as_bytes()[pos])
+        let current = self.current_scope_mut();
+        let op = OpCode::try_from_primitive(current.instrs.as_bytes()[pos])
             .expect("instruction to mutate should be valid");
         let new_instr = Instruction::new(op, vec![operand]);
-        self.instrs.replace_instr(pos, new_instr);
+        current.instrs.replace_instr(pos, new_instr);
     }
 
     fn compile_block(&mut self, block: &Block) -> Result<()> {
@@ -101,21 +141,29 @@ impl Compiler {
             }
             Stmt::Let { ident, expr } => {
                 self.compile_expr(expr)?;
-                let index = {
+                let (index, local) = {
                     let mut table = self.state.symbol_table.borrow_mut();
                     let symbol = table.define(&ident.0);
-                    symbol.index
+                    (symbol.index, symbol.scope == Scope::Local)
                 };
-                self.emit(OpCode::SetGlobal, vec![index]);
+                let opcode = if local {
+                    OpCode::SetLocal
+                } else {
+                    OpCode::SetGlobal
+                };
+                self.emit(opcode, vec![index]);
             }
-            stmt => todo!("compile stmt for: {stmt}"),
+            Stmt::Return { expr } => {
+                self.compile_expr(expr)?;
+                self.emit(OpCode::RetVal, vec![])
+            }
         }
 
         Ok(())
     }
 
     fn current_position(&self) -> usize {
-        self.instrs.as_bytes().len()
+        self.current_scope().instrs.as_bytes().len()
     }
 
     fn compile_expr(&mut self, expr: &Expr) -> Result<()> {
@@ -137,7 +185,7 @@ impl Compiler {
                     InfixOp::Eq => OpCode::Equal,
                     InfixOp::NotEq => OpCode::NotEqual,
                     InfixOp::Lt => OpCode::GreaterThan,
-                    op => todo!("opcode for {op}"),
+                    op => panic!("opcode for {op}"),
                 };
                 self.emit(opcode, vec![]);
             }
@@ -192,9 +240,12 @@ impl Compiler {
                 let jump_pos = self.current_position();
                 self.emit(OpCode::JumpNotTruthy, vec![9999]);
                 self.compile_block(consequence)?;
-                if self.last_opcode == OpCode::Pop {
-                    self.instrs.pop();
-                    self.last_opcode = self.prev_opcode;
+                {
+                    let current = self.current_scope_mut();
+                    if current.last_opcode == OpCode::Pop {
+                        current.instrs.pop();
+                        current.last_opcode = current.prev_opcode;
+                    }
                 }
 
                 // Position of the consequence jump instruction
@@ -208,21 +259,24 @@ impl Compiler {
                 } else {
                     self.emit(OpCode::Null, vec![]);
                 }
-                if self.last_opcode == OpCode::Pop {
-                    self.instrs.pop();
-                    self.last_opcode = self.prev_opcode;
+                {
+                    let current = self.current_scope_mut();
+                    if current.last_opcode == OpCode::Pop {
+                        current.instrs.pop();
+                        current.last_opcode = current.prev_opcode;
+                    }
                 }
                 // Change the operand of the consequence operand to the current position
                 // (after alt)
                 self.change_operand(cons_jump_pos, self.current_position() as u32);
             }
             Expr::Identifier(ident) => {
-                // TODO: error handling, make CompilerError
-                let index = {
+                let (index, local) = {
                     let table = &self.state.symbol_table.borrow();
                     let symbol = table.resolve(&ident.0);
+
                     match symbol {
-                        Some(sym) => sym.index,
+                        Some(sym) => (sym.index, sym.scope == Scope::Local),
                         None => {
                             return Err(CompilerError::UnboundVariable {
                                 name: ident.0.clone(),
@@ -230,14 +284,63 @@ impl Compiler {
                         }
                     }
                 };
-                self.emit(OpCode::GetGlobal, vec![index])
+                let opcode = if local {
+                    OpCode::GetLocal
+                } else {
+                    OpCode::GetGlobal
+                };
+                self.emit(opcode, vec![index])
             }
             Expr::Index { expr, index } => {
                 self.compile_expr(expr)?;
                 self.compile_expr(index)?;
                 self.emit(OpCode::Index, vec![]);
             }
-            expr => todo!("compile expr for: {expr}"),
+            Expr::Function { params, body } => {
+                // Special case: no body
+                if body.0.is_empty() {
+                    let function = Object::Function(Function {
+                        instrs: Instructions::from_iter([Instruction::new(OpCode::Ret, vec![])]),
+                        num_locals: 0,
+                        num_params: params.len() as u32,
+                    });
+                    self.state.constants.borrow_mut().push(function);
+                    let len = self.state.constants.borrow().len() - 1;
+                    self.emit(OpCode::Constant, vec![len as u32]);
+                    return Ok(());
+                }
+
+                self.enter_scope();
+
+                for param in params {
+                    self.state.symbol_table.borrow_mut().define(&param.0);
+                }
+                self.compile_block(body)?;
+                // If it ends with an Pop, replace it with RetVal, because of implicit returns
+                if self.current_scope().last_opcode == OpCode::Pop {
+                    self.current_scope_mut().instrs.pop();
+                    self.emit(OpCode::RetVal, vec![]);
+                    self.current_scope_mut().last_opcode = OpCode::RetVal;
+                }
+
+                let num_locals = self.state.symbol_table.borrow().locals();
+                let body = self.pop_scope();
+                let function = Object::Function(Function {
+                    instrs: body,
+                    num_locals,
+                    num_params: params.len() as u32,
+                });
+                self.state.constants.borrow_mut().push(function);
+                let len = self.state.constants.borrow().len() - 1;
+                self.emit(OpCode::Constant, vec![len as u32])
+            }
+            Expr::Call { func, args } => {
+                self.compile_expr(&func)?;
+                for arg in args {
+                    self.compile_expr(arg)?;
+                }
+                self.emit(OpCode::Call, vec![args.len() as u32]);
+            }
         }
 
         Ok(())
@@ -264,8 +367,18 @@ mod tests {
         };
     }
 
+    macro_rules! make_instrs {
+        ($(($opcode:ident$(, [$($operand:expr),*])?)),* $(,)?) => {
+            Instructions::from_iter([
+                $(
+                    Instruction::new(OpCode::$opcode, vec![$($($operand,)*)?]),
+                 )*
+            ])
+        };
+    }
+
     macro_rules! compiler_tests {
-        ($([$input:expr, { constants: $consts:expr, instrs: [$(($opcode:ident$(, [$($operand:expr),*])?)),* $(,)?] }]),+ $(,)?) => {
+        ($([$input:expr, { constants: $consts:expr, instrs: [$($instrs:tt)*] }]),+ $(,)?) => {
             $(
                 let lexer = Lexer::new($input);
                 let parser = Parser::new(lexer);
@@ -276,11 +389,7 @@ mod tests {
                 let bytecode = compiler.compile(program).expect("should compile with no errors");
                 let expect = Bytecode {
                     constants: $consts.into(),
-                    instrs: Instructions::from_iter([
-                        $(
-                            Instruction::new(OpCode::$opcode, vec![$($($operand,)*)?]),
-                         )*
-                    ]),
+                    instrs: make_instrs!($($instrs)*),
                 };
                 assert_instrs!(expect.instrs, bytecode.instrs, $input);
                 assert_eq!(expect.constants, bytecode.constants, "invalid constant pool for input {}", $input);
@@ -643,6 +752,194 @@ mod tests {
                         (Constant, [3]),
                         (Sub),
                         (Index),
+                        (Pop),
+                    ]
+                }
+            ],
+        );
+    }
+
+    #[test]
+    fn function_literals() {
+        compiler_tests!(
+            [
+                "fn() { return 5 + 10; }",
+                {
+                    constants: [Object::Int(5), Object::Int(10), Object::Function(Function {
+                        instrs: {
+                            make_instrs!(
+                                (Constant, [0]),
+                                (Constant, [1]),
+                                (Add),
+                                (RetVal),
+                            )
+                        },
+                        num_locals: 0,
+                        num_params: 0,
+                    })],
+                    instrs: [
+                        (Constant, [2]),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "fn() { 1; 2 }",
+                {
+                    constants: [Object::Int(1), Object::Int(2), Object::Function(Function {
+                        instrs: {
+                            make_instrs!(
+                                (Constant, [0]),
+                                (Pop),
+                                (Constant, [1]),
+                                (RetVal),
+                            )
+                        },
+                        num_locals: 0,
+                        num_params: 0,
+                    })],
+                    instrs: [
+                        (Constant, [2]),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "fn() {}",
+                {
+                    constants: [Object::Function(Function {
+                        instrs: {
+                            make_instrs!(
+                                (Ret),
+                            )
+                        },
+                        num_locals: 0,
+                        num_params: 0,
+                    })],
+                    instrs: [
+                        (Constant, [0]),
+                        (Pop),
+                    ]
+                }
+            ],
+        );
+    }
+
+    #[test]
+    fn function_calls() {
+        compiler_tests!(
+            [
+                "fn() {}()",
+                {
+                    constants: [Object::Function(Function {
+                        instrs: {
+                            make_instrs!(
+                                (Ret),
+                            )
+                        },
+                        num_locals: 0,
+                        num_params: 0,
+                    })],
+                    instrs: [
+                        (Constant, [0]),
+                        (Call, [0]),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "let x = fn() {};
+                x();",
+                {
+                    constants: [Object::Function(Function {
+                        instrs: {
+                            make_instrs!(
+                                (Ret),
+                            )
+                        },
+                        num_locals: 0,
+                        num_params: 0,
+                    })],
+                    instrs: [
+                        (Constant, [0]),
+                        (SetGlobal, [0]),
+                        (GetGlobal, [0]),
+                        (Call, [0]),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "let x = fn(x, y) { x + y };
+                x(1, 2);",
+                {
+                    constants: [Object::Function(Function {
+                        instrs: {
+                            make_instrs!(
+                                (GetLocal, [0]),
+                                (GetLocal, [1]),
+                                (Add),
+                                (RetVal),
+                            )
+                        },
+                        num_locals: 2,
+                        num_params: 2,
+                    }), Object::Int(1), Object::Int(2)],
+                    instrs: [
+                        (Constant, [0]),
+                        (SetGlobal, [0]),
+                        (GetGlobal, [0]),
+                        (Constant, [1]),
+                        (Constant, [2]),
+                        (Call, [2]),
+                        (Pop),
+                    ]
+                }
+            ],
+        );
+    }
+
+    #[test]
+    fn local_variables() {
+        compiler_tests!(
+            [
+                "let x = 1; fn() { x }",
+                {
+                    constants: [Object::Int(1), Object::Function(Function {
+                        instrs: {
+                            make_instrs!(
+                                (GetGlobal, [0]),
+                                (RetVal),
+                            )
+                        },
+                        num_locals: 0,
+                        num_params: 0,
+                    })],
+                    instrs: [
+                        (Constant, [0]),
+                        (SetGlobal, [0]),
+                        (Constant, [1]),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "fn() { let num = 55; num }",
+                {
+                    constants: [Object::Int(55), Object::Function(Function {
+                        instrs: {
+                            make_instrs!(
+                                (Constant, [0]),
+                                (SetLocal, [0]),
+                                (GetLocal, [0]),
+                                (RetVal),
+                            )
+                         },
+                        num_locals: 1,
+                        num_params: 0,
+                    })],
+                    instrs: [
+                        (Constant, [1]),
                         (Pop),
                     ]
                 }

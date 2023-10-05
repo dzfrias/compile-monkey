@@ -7,7 +7,7 @@ use num_enum::TryFromPrimitive;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Instruction(Vec<u8>);
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Instructions(Vec<u8>);
 
 impl Instruction {
@@ -30,6 +30,12 @@ impl Instruction {
                         .expect("operand should be two bytes wide")
                         .to_be_bytes();
                     instr[offset..].copy_from_slice(&bytes);
+                }
+                OpWidth::Byte => {
+                    let byte = u8::try_from(*op)
+                        .expect("operand should be one byte wide")
+                        .to_be_bytes();
+                    instr[offset] = byte[0];
                 }
             }
             offset += *width as usize
@@ -108,7 +114,7 @@ impl FromIterator<Instruction> for Instructions {
 }
 
 /// An opcode in the monkey VM.
-#[derive(Debug, TryFromPrimitive, Clone, Copy, PartialEq)]
+#[derive(Debug, TryFromPrimitive, Clone, Copy, PartialEq, Default)]
 #[repr(u8)]
 pub enum OpCode {
     /// Pull an object from the constant pool [u16]
@@ -142,6 +148,7 @@ pub enum OpCode {
     /// Jump to instruction if the object on the stack is not truthy [u16]
     JumpNotTruthy,
     /// Push the null object onto the stack.
+    #[default]
     Null,
     /// Set a global variable to the top of the stack [u16]
     SetGlobal,
@@ -153,6 +160,16 @@ pub enum OpCode {
     HashMap,
     /// Index the second object on the stack with the first object on the stack
     Index,
+    /// Call the function on the stack [u8]
+    Call,
+    /// Return the value on the stack.
+    RetVal,
+    /// Return from the current function.
+    Ret,
+    /// Set a local variable to the top of the stack [u16]
+    SetLocal,
+    /// Get a local variable corresponding to the passed-in id [u16]
+    GetLocal,
 }
 
 #[derive(Debug, Clone)]
@@ -164,6 +181,7 @@ pub struct Definition {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[repr(u8)]
 pub enum OpWidth {
+    Byte = 1,
     HalfWord = 2,
 }
 
@@ -204,6 +222,11 @@ impl OpCode {
             Array: [OpWidth::HalfWord],
             HashMap: [OpWidth::HalfWord],
             Index: [],
+            Call: [OpWidth::Byte],
+            Ret: [],
+            RetVal: [],
+            SetLocal: [OpWidth::HalfWord],
+            GetLocal: [OpWidth::HalfWord],
         )
     }
 }
