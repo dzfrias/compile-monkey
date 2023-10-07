@@ -8,7 +8,7 @@ use num_enum::TryFromPrimitive;
 use crate::{
     compiler::symbol_table::Scope,
     frontend::ast::{Block, Expr, InfixOp, PrefixOp, Program, Stmt},
-    object::{Function, Object},
+    object::{self, Function, Object},
     opcode::{Instruction, Instructions, OpCode},
 };
 pub use error::{CompilerError, Result};
@@ -22,6 +22,8 @@ use symbol_table::SymbolTable;
 pub struct State {
     symbol_table: Rc<RefCell<SymbolTable>>,
     constants: Rc<RefCell<Vec<Object>>>,
+
+    has_defined_builtins: bool,
 }
 
 #[derive(Debug)]
@@ -46,17 +48,35 @@ struct CompilationScope {
 
 impl Compiler {
     pub fn new() -> Self {
-        Self {
+        let mut c = Self {
             state: State::default(),
             scope_stack: vec![CompilationScope::default()],
+        };
+        for (i, (name, _)) in object::builtins().iter().enumerate() {
+            c.state
+                .symbol_table
+                .borrow_mut()
+                .define_builtin(name, i as u32)
         }
+        c.state.has_defined_builtins = true;
+        c
     }
 
     pub fn new_with_state(state: State) -> Self {
-        Self {
+        let mut c = Self {
             state,
             ..Self::new()
+        };
+        if !c.state.has_defined_builtins {
+            for (i, (name, _)) in object::builtins().iter().enumerate() {
+                c.state
+                    .symbol_table
+                    .borrow_mut()
+                    .define_builtin(name, i as u32)
+            }
+            c.state.has_defined_builtins = true;
         }
+        c
     }
 
     pub fn compile(mut self, program: Program) -> Result<Bytecode> {
@@ -271,12 +291,12 @@ impl Compiler {
                 self.change_operand(cons_jump_pos, self.current_position() as u32);
             }
             Expr::Identifier(ident) => {
-                let (index, local) = {
+                let (index, scope) = {
                     let table = &self.state.symbol_table.borrow();
                     let symbol = table.resolve(&ident.0);
 
                     match symbol {
-                        Some(sym) => (sym.index, sym.scope == Scope::Local),
+                        Some(sym) => (sym.index, sym.scope),
                         None => {
                             return Err(CompilerError::UnboundVariable {
                                 name: ident.0.clone(),
@@ -284,10 +304,10 @@ impl Compiler {
                         }
                     }
                 };
-                let opcode = if local {
-                    OpCode::GetLocal
-                } else {
-                    OpCode::GetGlobal
+                let opcode = match scope {
+                    Scope::Local => OpCode::GetLocal,
+                    Scope::Global => OpCode::GetGlobal,
+                    Scope::Builtin => OpCode::GetBuiltin,
                 };
                 self.emit(opcode, vec![index])
             }
@@ -940,6 +960,30 @@ mod tests {
                     })],
                     instrs: [
                         (Constant, [1]),
+                        (Pop),
+                    ]
+                }
+            ],
+        );
+    }
+
+    #[test]
+    fn builtin_functions() {
+        compiler_tests!(
+            [
+                "len([]);
+                push([], 1);",
+                {
+                    constants: [Object::Int(1)],
+                    instrs: [
+                        (GetBuiltin, [0]),
+                        (Array, [0]),
+                        (Call, [1]),
+                        (Pop),
+                        (GetBuiltin, [4]),
+                        (Array, [0]),
+                        (Constant, [0]),
+                        (Call, [2]),
                         (Pop),
                     ]
                 }

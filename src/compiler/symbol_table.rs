@@ -5,6 +5,7 @@ use std::collections::HashMap;
 pub enum Scope {
     Global,
     Local,
+    Builtin,
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +29,18 @@ impl SymbolTable {
             outer: Some(outer.into()),
             ..Default::default()
         }
+    }
+
+    pub fn define_builtin(&mut self, name: &str, index: u32) {
+        let name = SmolStr::new(name);
+        self.symbols.insert(
+            name.clone(),
+            Symbol {
+                name,
+                scope: Scope::Builtin,
+                index,
+            },
+        );
     }
 
     pub fn define(&mut self, name: &str) -> &Symbol {

@@ -25,4 +25,6 @@ pub enum RuntimeError {
     UncallableType(Type),
     #[error("wrong number of arguments provided, got: {got}, expected: {expected}")]
     WrongArgs { got: u32, expected: u32 },
+    #[error("wrong argument type provided, got: {got}, expected: {want}")]
+    WrongArgType { got: Type, want: Type },
 }

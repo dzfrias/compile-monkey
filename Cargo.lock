@@ -51,6 +51,7 @@ name = "compile-monkey"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bitflags 2.4.0",
  "num_enum",
  "rustyline",
  "smol_str",

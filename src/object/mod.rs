@@ -1,14 +1,12 @@
 #![allow(dead_code)]
 
+mod builtins;
 mod env;
 
 use crate::opcode::Instructions;
-use std::{
-    collections::{HashMap, HashSet},
-    fmt,
-    hash::Hash,
-};
+use std::{collections::HashMap, fmt, hash::Hash};
 
+pub(crate) use builtins::*;
 pub use env::Env;
 
 pub const TRUE: Object = Object::Bool(true);
@@ -25,20 +23,20 @@ pub enum Object {
     Null,
     ReturnVal(Box<Object>),
     Function(Function),
-    Builtin,
+    Builtin(Builtin),
 }
 
 impl Object {
     pub fn monkey_type(&self) -> Type {
         match self {
-            Self::Int(_) => Type::Int,
-            Self::Bool(_) => Type::Bool,
-            Self::String(_) => Type::String,
-            Self::Array(_) => Type::Array,
-            Self::HashMap(_) => Type::HashMap,
-            Self::Null => Type::Null,
-            Self::Function { .. } => Type::Function,
-            Self::Builtin { .. } => Type::Builtin,
+            Self::Int(_) => Type::INT,
+            Self::Bool(_) => Type::BOOL,
+            Self::String(_) => Type::STRING,
+            Self::Array(_) => Type::ARRAY,
+            Self::HashMap(_) => Type::HASHMAP,
+            Self::Null => Type::NULL,
+            Self::Function { .. } => Type::FUNCTION,
+            Self::Builtin { .. } => Type::BUILTIN,
             Self::ReturnVal(val) => val.monkey_type(),
         }
     }
@@ -107,49 +105,32 @@ pub struct Function {
     pub num_params: u32,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub enum Type {
-    Int,
-    Bool,
-    String,
-    Array,
-    HashMap,
-    Null,
-    Function,
-    Builtin,
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct Type: u16 {
+        const INT       = 0b00000001;
+        const BOOL      = 0b00000010;
+        const STRING    = 0b00000100;
+        const ARRAY     = 0b00001000;
+        const HASHMAP   = 0b00010000;
+        const NULL      = 0b00100000;
+        const FUNCTION  = 0b01000000;
+        const BUILTIN   = 0b10000000;
+    }
 }
 
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Int => write!(f, "Int"),
-            Self::Bool => write!(f, "Bool"),
-            Self::String => write!(f, "String"),
-            Self::Array => write!(f, "Array"),
-            Self::HashMap => write!(f, "Hashmap"),
-            Self::Null => write!(f, "<null>"),
-            Self::Function => write!(f, "Function"),
-            Self::Builtin => write!(f, "[builtin]"),
+        match *self {
+            Self::INT => write!(f, "Int"),
+            Self::BOOL => write!(f, "Bool"),
+            Self::STRING => write!(f, "String"),
+            Self::ARRAY => write!(f, "Array"),
+            Self::HASHMAP => write!(f, "Hashmap"),
+            Self::NULL => write!(f, "<null>"),
+            Self::FUNCTION => write!(f, "Function"),
+            Self::BUILTIN => write!(f, "[builtin]"),
+            _ => write!(f, "todo"),
         }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TypeSignature(pub HashSet<Type>);
-
-impl fmt::Display for TypeSignature {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let joined = self
-            .0
-            .iter()
-            .map(|elem| elem.to_string() + " | ")
-            .collect::<String>();
-        write!(
-            f,
-            "{}",
-            joined
-                .strip_suffix(" | ")
-                .expect("Should always have trailing ' | '")
-        )
     }
 }

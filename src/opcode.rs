@@ -170,6 +170,8 @@ pub enum OpCode {
     SetLocal,
     /// Get a local variable corresponding to the passed-in id [u16]
     GetLocal,
+    /// Push a builtin onto the stack [u8]
+    GetBuiltin,
 }
 
 #[derive(Debug, Clone)]
@@ -227,6 +229,7 @@ impl OpCode {
             RetVal: [],
             SetLocal: [OpWidth::HalfWord],
             GetLocal: [OpWidth::HalfWord],
+            GetBuiltin: [OpWidth::Byte],
         )
     }
 }

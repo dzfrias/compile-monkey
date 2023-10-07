@@ -6,7 +6,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use crate::{
     compiler::Bytecode,
     frontend::ast::{InfixOp, PrefixOp},
-    object::{Object, Type, FALSE, NULL, TRUE},
+    object::{self, Object, Type, FALSE, NULL, TRUE},
     opcode::OpCode,
     vm::{
         error::{Result, RuntimeError},
@@ -162,28 +162,34 @@ impl Vm {
                     args.reverse();
 
                     let obj = self.pop().unwrap();
-                    let Object::Function(func) = obj else {
-                        return Err(RuntimeError::UncallableType(obj.monkey_type()));
-                    };
-                    self.push_frame(Frame::new(func.instrs, self.sp));
 
-                    if args.len() as u32 != func.num_params {
-                        return Err(RuntimeError::WrongArgs {
-                            expected: func.num_params,
-                            got: args.len() as u32,
-                        });
-                    }
-                    // Push args back onto the stack, as local variables
-                    for arg in args {
-                        self.push(arg)?;
-                    }
+                    match obj {
+                        Object::Function(func) => {
+                            self.push_frame(Frame::new(func.instrs, self.sp));
 
-                    for _ in 0..func.num_locals {
-                        self.push(NULL)?;
+                            if args.len() as u32 != func.num_params {
+                                return Err(RuntimeError::WrongArgs {
+                                    expected: func.num_params,
+                                    got: args.len() as u32,
+                                });
+                            }
+                            // Push args back onto the stack, as local variables
+                            for arg in args {
+                                self.push(arg)?;
+                            }
+
+                            for _ in 0..func.num_locals {
+                                self.push(NULL)?;
+                            }
+                            self.sp += func.num_locals as usize + argnum;
+                            // continue to not increment with new frame
+                            continue;
+                        }
+                        Object::Builtin(builtin) => {
+                            self.push(builtin(args)?)?;
+                        }
+                        _ => return Err(RuntimeError::UncallableType(obj.monkey_type())),
                     }
-                    self.sp += func.num_locals as usize + argnum;
-                    // continue to not increment with new frame
-                    continue;
                 }
                 OpCode::Ret => {
                     self.pop_frame();
@@ -208,6 +214,11 @@ impl Vm {
                     let bp = self.current_frame().bp;
                     let obj = self.stack[bp + local_idx as usize].clone();
                     self.push(obj)?;
+                }
+                OpCode::GetBuiltin => {
+                    let idx = self.read_u8();
+                    let (_, def) = object::builtins()[idx as usize];
+                    self.push(Object::Builtin(def))?;
                 }
             }
 
@@ -320,8 +331,8 @@ impl Vm {
                 let corresponding = opcode_to_infix_op(op)
                     .expect("BUG: should not be called with opcode that is not an infix op");
                 return Err(RuntimeError::InvalidTypes {
-                    lhs: Type::Bool,
-                    rhs: Type::Bool,
+                    lhs: Type::BOOL,
+                    rhs: Type::BOOL,
                     op: corresponding,
                 });
             }
@@ -354,7 +365,7 @@ impl Vm {
         match op {
             OpCode::Minus => self.push(Object::Int(-int)),
             _ => Err(RuntimeError::InvalidType {
-                expr: Type::Int,
+                expr: Type::INT,
                 op: opcode_to_prefix_op(op)
                     .expect("should not be called with invalid prefix opcode"),
             }),
@@ -365,7 +376,7 @@ impl Vm {
         match op {
             OpCode::Bang => self.push(Object::Bool(!bool)),
             _ => Err(RuntimeError::InvalidType {
-                expr: Type::Bool,
+                expr: Type::BOOL,
                 op: opcode_to_prefix_op(op)
                     .expect("should not be called with invalid prefix opcode"),
             }),
@@ -377,8 +388,8 @@ impl Vm {
             OpCode::Add => Object::String(lhs + &rhs),
             _ => {
                 return Err(RuntimeError::InvalidTypes {
-                    lhs: Type::String,
-                    rhs: Type::String,
+                    lhs: Type::STRING,
+                    rhs: Type::STRING,
                     op: opcode_to_infix_op(op)
                         .expect("should not be called with invalid prefix opcode"),
                 })
@@ -600,6 +611,17 @@ mod tests {
             [
                 "let one = 1; let three = fn() { return one + 2 }; three()",
                 &Object::Int(3)
+            ],
+        );
+    }
+
+    #[test]
+    fn can_eval_builtin_functions() {
+        vm_test!(
+            ["len([])", &Object::Int(0)],
+            [
+                "let x = []; push(x, 1);",
+                &Object::Array(vec![Object::Int(1)])
             ],
         );
     }
