@@ -85,7 +85,7 @@ impl fmt::Display for Instructions {
                 let width_num = *width as usize;
                 let bytes = &bytes[i..i + width_num];
                 let mut u32_bytes = [0; 4];
-                u32_bytes[width_num..].copy_from_slice(bytes);
+                u32_bytes[4 - width_num..].copy_from_slice(bytes);
                 let op = u32::from_be_bytes(u32_bytes);
                 operands.push(op);
                 offset += width_num;
@@ -267,5 +267,11 @@ mod tests {
 ",
             instrs.to_string()
         );
+    }
+
+    #[test]
+    fn one_byte_operands_to_string() {
+        let instrs = Instructions::from_iter([Instruction::new(OpCode::GetBuiltin, vec![1])]);
+        assert_eq!("0000 GetBuiltin 1\n", instrs.to_string());
     }
 }
