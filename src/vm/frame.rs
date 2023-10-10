@@ -1,14 +1,18 @@
-use crate::opcode::Instructions;
+use crate::object::Closure;
 
 #[derive(Debug)]
 pub struct Frame {
-    pub instrs: Instructions,
+    pub closure: Closure,
     pub ip: usize,
     pub bp: usize,
 }
 
 impl Frame {
-    pub fn new(instrs: Instructions, bp: usize) -> Self {
-        Self { instrs, ip: 0, bp }
+    pub fn new(instrs: Closure, bp: usize) -> Self {
+        Self {
+            closure: instrs,
+            ip: 0,
+            bp,
+        }
     }
 }

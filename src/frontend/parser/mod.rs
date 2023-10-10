@@ -167,7 +167,11 @@ impl<'a> Parser<'a> {
 
         self.next_token().expect_peek(Token::Assign)?.next_token();
 
-        let value = self.parse_expr(Precedence::Lowest)?;
+        let mut value = self.parse_expr(Precedence::Lowest)?;
+
+        if let Expr::Function { name, .. } = &mut value {
+            *name = Some(ident.clone().0);
+        }
         if self.peek_tok == Token::Semicolon {
             self.next_token();
         }
@@ -348,7 +352,11 @@ impl<'a> Parser<'a> {
         self.in_func = true;
         let body = self.expect_peek(Token::Lbrace)?.parse_block_stmt()?;
         self.in_func = false;
-        Some(Expr::Function { params, body })
+        Some(Expr::Function {
+            params,
+            body,
+            name: None,
+        })
     }
 
     fn parse_function_params(&mut self) -> Option<Vec<ast::Identifier>> {
@@ -721,7 +729,7 @@ mod tests {
             let program = parser.parse_program().expect("Parser errors found");
 
             assert_eq!(1, program.0.len());
-            if let Stmt::Expr(Expr::Function { params, body }) = &program.0[0] {
+            if let Stmt::Expr(Expr::Function { params, body, .. }) = &program.0[0] {
                 let expect_params: Vec<ast::Identifier> = expected
                     .iter()
                     .map(|x| ast::Identifier::from(x.to_owned()))

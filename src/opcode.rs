@@ -4,10 +4,10 @@ use std::fmt;
 
 use num_enum::TryFromPrimitive;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Instruction(Vec<u8>);
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct Instructions(Vec<u8>);
 
 impl Instruction {
@@ -29,7 +29,7 @@ impl Instruction {
                     let bytes = u16::try_from(*op)
                         .expect("operand should be two bytes wide")
                         .to_be_bytes();
-                    instr[offset..].copy_from_slice(&bytes);
+                    instr[offset..offset + 2].copy_from_slice(&bytes);
                 }
                 OpWidth::Byte => {
                     let byte = u8::try_from(*op)
@@ -71,6 +71,12 @@ impl Instructions {
     }
 }
 
+impl fmt::Debug for Instructions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self}")
+    }
+}
+
 impl fmt::Display for Instructions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let bytes = self.as_bytes();
@@ -81,7 +87,7 @@ impl fmt::Display for Instructions {
             let def = op.definition();
             let mut offset = 0;
             for width in def.op_widths {
-                let i = i + 1;
+                let i = i + offset + 1;
                 let width_num = *width as usize;
                 let bytes = &bytes[i..i + width_num];
                 let mut u32_bytes = [0; 4];
@@ -172,6 +178,12 @@ pub enum OpCode {
     GetLocal,
     /// Push a builtin onto the stack [u8]
     GetBuiltin,
+    /// Create a closure [u16, u8]
+    Closure,
+    /// Get a free variable [u8]
+    GetFree,
+    /// Push the currently executing closure onto the stack
+    CurrentClosure,
 }
 
 #[derive(Debug, Clone)]
@@ -230,6 +242,9 @@ impl OpCode {
             SetLocal: [OpWidth::HalfWord],
             GetLocal: [OpWidth::HalfWord],
             GetBuiltin: [OpWidth::Byte],
+            Closure: [OpWidth::HalfWord, OpWidth::Byte],
+            GetFree: [OpWidth::Byte],
+            CurrentClosure: [],
         )
     }
 }
@@ -273,5 +288,11 @@ mod tests {
     fn one_byte_operands_to_string() {
         let instrs = Instructions::from_iter([Instruction::new(OpCode::GetBuiltin, vec![1])]);
         assert_eq!("0000 GetBuiltin 1\n", instrs.to_string());
+    }
+
+    #[test]
+    fn two_operands_to_string() {
+        let instrs = Instructions::from_iter([Instruction::new(OpCode::Closure, vec![1, 1])]);
+        assert_eq!("0000 Closure 1 1\n", instrs.to_string());
     }
 }

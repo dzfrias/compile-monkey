@@ -6,7 +6,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use crate::{
     compiler::Bytecode,
     frontend::ast::{InfixOp, PrefixOp},
-    object::{self, Object, Type, FALSE, NULL, TRUE},
+    object::{self, Closure, Function, Object, Type, FALSE, NULL, TRUE},
     opcode::OpCode,
     vm::{
         error::{Result, RuntimeError},
@@ -49,7 +49,15 @@ pub struct Vm {
 impl Vm {
     pub fn new(Bytecode { instrs, constants }: Bytecode) -> Self {
         let mut frames = Vec::with_capacity(CALLSTACK_SIZE);
-        frames.push(Frame::new(instrs, 0));
+        let initial = Closure {
+            inner: Function {
+                instrs,
+                num_locals: 0,
+                num_params: 0,
+            },
+            free: vec![],
+        };
+        frames.push(Frame::new(initial, 0));
 
         Self {
             frames,
@@ -69,9 +77,9 @@ impl Vm {
     }
 
     pub fn run(&mut self) -> Result<()> {
-        while self.current_frame().ip < self.current_frame().instrs.as_bytes().len() {
+        while self.current_frame().ip < self.current_frame().closure.inner.instrs.as_bytes().len() {
             let ip = self.current_frame().ip;
-            let op = OpCode::try_from(self.current_frame().instrs.as_bytes()[ip])
+            let op = OpCode::try_from(self.current_frame().closure.inner.instrs.as_bytes()[ip])
                 .expect("bytecode error: invalid opcode");
 
             match op {
@@ -164,12 +172,15 @@ impl Vm {
                     let obj = self.pop().unwrap();
 
                     match obj {
-                        Object::Function(func) => {
-                            self.push_frame(Frame::new(func.instrs, self.sp));
+                        /* Object::Function(func) |  */
+                        Object::Closure(func) => {
+                            let params = func.inner.num_params;
+                            let locals = func.inner.num_locals;
+                            self.push_frame(Frame::new(func, self.stack.len()));
 
-                            if args.len() as u32 != func.num_params {
+                            if args.len() as u32 != params {
                                 return Err(RuntimeError::WrongArgs {
-                                    expected: func.num_params,
+                                    expected: params,
                                     got: args.len() as u32,
                                 });
                             }
@@ -178,10 +189,10 @@ impl Vm {
                                 self.push(arg)?;
                             }
 
-                            for _ in 0..func.num_locals {
+                            for _ in 0..locals {
                                 self.push(NULL)?;
                             }
-                            self.sp += func.num_locals as usize + argnum;
+                            self.sp += locals as usize + argnum;
                             // continue to not increment with new frame
                             continue;
                         }
@@ -219,6 +230,32 @@ impl Vm {
                     let idx = self.read_u8();
                     let (_, def) = object::builtins()[idx as usize];
                     self.push(Object::Builtin(def))?;
+                }
+                OpCode::Closure => {
+                    let idx = self.read_u16();
+                    let free_len = self.read_u8() as usize;
+                    let mut free = vec![NULL; free_len];
+                    for i in 1..=free_len {
+                        free[free_len - i] = self.pop().unwrap();
+                    }
+                    let constant = &self.constants[idx as usize];
+                    let Object::Function(func) = constant else {
+                        panic!("trying to convert non-function into a closure");
+                    };
+                    let closure = Closure {
+                        inner: func.clone(),
+                        free,
+                    };
+                    self.push(Object::Closure(closure))?;
+                }
+                OpCode::GetFree => {
+                    let idx = self.read_u8();
+                    let free = &self.current_frame().closure.free;
+                    self.push(free[idx as usize].clone())?;
+                }
+                OpCode::CurrentClosure => {
+                    let current = self.current_frame().closure.clone();
+                    self.push(Object::Closure(current))?;
                 }
             }
 
@@ -421,7 +458,7 @@ impl Vm {
 
     fn read_u16(&mut self) -> u16 {
         let start = self.current_frame().ip + 1;
-        let bytes: [u8; 2] = self.current_frame().instrs.as_bytes()[start..start + 2]
+        let bytes: [u8; 2] = self.current_frame().closure.inner.instrs.as_bytes()[start..start + 2]
             .try_into()
             .expect("should be two bytes long");
         self.current_frame_mut().ip += 2;
@@ -430,7 +467,7 @@ impl Vm {
 
     fn read_u8(&mut self) -> u8 {
         let start = self.current_frame().ip + 1;
-        let bytes: [u8; 1] = self.current_frame().instrs.as_bytes()[start..start + 1]
+        let bytes: [u8; 1] = self.current_frame().closure.inner.instrs.as_bytes()[start..start + 1]
             .try_into()
             .expect("should be one byte long");
         self.current_frame_mut().ip += 1;
@@ -623,6 +660,15 @@ mod tests {
                 "let x = []; push(x, 1);",
                 &Object::Array(vec![Object::Int(1)])
             ],
+        );
+    }
+
+    #[test]
+    fn can_eval_closures() {
+        vm_test!(
+            ["let func = fn(a) { fn(b) { a + b } }; func(1)(2)", &Object::Int(3)],
+            ["let countDown = fn(x) { if (x == 0) { return 0; } else { countDown(x - 1) } }; countDown(1)", &Object::Int(0)],
+            ["let wrapper = fn() { let countDown = fn(x) { if (x == 0) { return 0; } else { countDown(x - 1) } }; countDown(1) }; wrapper()", &Object::Int(0)],
         );
     }
 }

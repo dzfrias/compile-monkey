@@ -24,6 +24,7 @@ pub enum Object {
     ReturnVal(Box<Object>),
     Function(Function),
     Builtin(Builtin),
+    Closure(Closure),
 }
 
 impl Object {
@@ -36,6 +37,7 @@ impl Object {
             Self::HashMap(_) => Type::HASHMAP,
             Self::Null => Type::NULL,
             Self::Function { .. } => Type::FUNCTION,
+            Self::Closure(_) => Type::FUNCTION,
             Self::Builtin { .. } => Type::BUILTIN,
             Self::ReturnVal(val) => val.monkey_type(),
         }
@@ -61,7 +63,8 @@ impl fmt::Display for Object {
             Self::ReturnVal(obj) => write!(f, "{}", *obj),
             Self::Null => write!(f, "null"),
             Self::String(s) => write!(f, "\"{s}\""),
-            Self::Function { .. } => write!(f, "func"),
+            Self::Function(_) => write!(f, "func"),
+            Self::Closure(_) => write!(f, "func"),
             Self::Builtin { .. } => write!(f, "[builtin function]"),
             Self::Array(arr) => {
                 let joined = arr
@@ -103,6 +106,12 @@ pub struct Function {
     pub instrs: Instructions,
     pub num_locals: u32,
     pub num_params: u32,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Closure {
+    pub inner: Function,
+    pub free: Vec<Object>,
 }
 
 bitflags::bitflags! {

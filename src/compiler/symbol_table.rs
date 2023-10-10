@@ -6,8 +6,11 @@ pub enum Scope {
     Global,
     Local,
     Builtin,
+    Free,
+    Function,
 }
 
+/// A cheap to clone representation of a scoped identifier.
 #[derive(Debug, Clone)]
 pub struct Symbol {
     pub name: SmolStr,
@@ -18,6 +21,7 @@ pub struct Symbol {
 #[derive(Debug, Clone, Default)]
 pub struct SymbolTable {
     pub outer: Option<Box<SymbolTable>>,
+    pub free: Vec<Symbol>,
 
     symbols: HashMap<SmolStr, Symbol>,
     index: u32,
@@ -46,13 +50,10 @@ impl SymbolTable {
     pub fn define(&mut self, name: &str) -> &Symbol {
         let name = SmolStr::new(name);
 
-        let index = match self.symbols.get(&name) {
-            Some(symbol) => symbol.index,
-            None => {
-                let i = self.index;
-                self.index += 1;
-                i
-            }
+        let index = {
+            let i = self.index;
+            self.index += 1;
+            i
         };
         let symbol = Symbol {
             name: name.clone(),
@@ -67,15 +68,42 @@ impl SymbolTable {
         self.symbols.get(&name).unwrap()
     }
 
-    pub fn locals(&self) -> u32 {
-        self.symbols.len() as u32
+    pub fn define_function(&mut self, name: &str) -> &Symbol {
+        let s_name = SmolStr::new(name);
+        let symbol = Symbol {
+            name: s_name.clone(),
+            scope: Scope::Function,
+            index: 0,
+        };
+        self.symbols.insert(s_name, symbol);
+        self.symbols.get(name).unwrap()
     }
 
-    pub fn resolve(&self, name: &str) -> Option<&Symbol> {
-        match self.symbols.get(name) {
-            Some(symbol) => Some(symbol),
-            None if self.outer.is_some() => self.outer.as_ref().unwrap().resolve(name),
-            None => None,
+    pub fn locals(&self) -> u32 {
+        (self.symbols.len() - self.free.len()) as u32
+    }
+
+    pub fn resolve(&mut self, name: &str) -> Option<Symbol> {
+        let outer = match self.symbols.get(name) {
+            Some(symbol) => return Some(symbol.clone()),
+            None if self.outer.is_some() => self.outer.as_mut().unwrap(),
+            None => return None,
+        };
+        let symbol = outer.resolve(name)?;
+        if matches!(symbol.scope, Scope::Global | Scope::Builtin) {
+            return Some(symbol);
         }
+
+        Some({
+            let original = symbol.clone();
+            self.free.push(original.clone());
+            let symbol = Symbol {
+                name: original.name.clone(),
+                index: self.free.len() as u32 - 1,
+                scope: Scope::Free,
+            };
+            self.symbols.insert(original.name.clone(), symbol);
+            self.symbols.get(&original.name).unwrap().clone()
+        })
     }
 }

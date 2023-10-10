@@ -160,12 +160,12 @@ impl Compiler {
                 self.emit(OpCode::Pop, vec![]);
             }
             Stmt::Let { ident, expr } => {
-                self.compile_expr(expr)?;
                 let (index, local) = {
                     let mut table = self.state.symbol_table.borrow_mut();
                     let symbol = table.define(&ident.0);
                     (symbol.index, symbol.scope == Scope::Local)
                 };
+                self.compile_expr(expr)?;
                 let opcode = if local {
                     OpCode::SetLocal
                 } else {
@@ -292,7 +292,7 @@ impl Compiler {
             }
             Expr::Identifier(ident) => {
                 let (index, scope) = {
-                    let table = &self.state.symbol_table.borrow();
+                    let mut table = self.state.symbol_table.borrow_mut();
                     let symbol = table.resolve(&ident.0);
 
                     match symbol {
@@ -304,19 +304,14 @@ impl Compiler {
                         }
                     }
                 };
-                let opcode = match scope {
-                    Scope::Local => OpCode::GetLocal,
-                    Scope::Global => OpCode::GetGlobal,
-                    Scope::Builtin => OpCode::GetBuiltin,
-                };
-                self.emit(opcode, vec![index])
+                self.load_symbol(scope, index);
             }
             Expr::Index { expr, index } => {
                 self.compile_expr(expr)?;
                 self.compile_expr(index)?;
                 self.emit(OpCode::Index, vec![]);
             }
-            Expr::Function { params, body } => {
+            Expr::Function { params, body, name } => {
                 // Special case: no body
                 if body.0.is_empty() {
                     let function = Object::Function(Function {
@@ -326,11 +321,15 @@ impl Compiler {
                     });
                     self.state.constants.borrow_mut().push(function);
                     let len = self.state.constants.borrow().len() - 1;
-                    self.emit(OpCode::Constant, vec![len as u32]);
+                    self.emit(OpCode::Closure, vec![len as u32, 0]);
                     return Ok(());
                 }
 
                 self.enter_scope();
+
+                if let Some(name) = name {
+                    self.state.symbol_table.borrow_mut().define_function(&name);
+                }
 
                 for param in params {
                     self.state.symbol_table.borrow_mut().define(&param.0);
@@ -343,6 +342,8 @@ impl Compiler {
                     self.current_scope_mut().last_opcode = OpCode::RetVal;
                 }
 
+                // TODO: no clone here?
+                let frees = self.state.symbol_table.borrow().free.clone();
                 let num_locals = self.state.symbol_table.borrow().locals();
                 let body = self.pop_scope();
                 let function = Object::Function(Function {
@@ -351,8 +352,11 @@ impl Compiler {
                     num_params: params.len() as u32,
                 });
                 self.state.constants.borrow_mut().push(function);
+                for sym in &frees {
+                    self.load_symbol(sym.scope, sym.index);
+                }
                 let len = self.state.constants.borrow().len() - 1;
-                self.emit(OpCode::Constant, vec![len as u32])
+                self.emit(OpCode::Closure, vec![len as u32, frees.len() as u32]);
             }
             Expr::Call { func, args } => {
                 self.compile_expr(&func)?;
@@ -364,6 +368,17 @@ impl Compiler {
         }
 
         Ok(())
+    }
+
+    fn load_symbol(&mut self, scope: Scope, index: u32) {
+        let opcode = match scope {
+            Scope::Local => OpCode::GetLocal,
+            Scope::Global => OpCode::GetGlobal,
+            Scope::Builtin => OpCode::GetBuiltin,
+            Scope::Free => OpCode::GetFree,
+            Scope::Function => OpCode::CurrentClosure,
+        };
+        self.emit(opcode, vec![index]);
     }
 }
 
@@ -798,7 +813,7 @@ mod tests {
                         num_params: 0,
                     })],
                     instrs: [
-                        (Constant, [2]),
+                        (Closure, [2, 0]),
                         (Pop),
                     ]
                 }
@@ -819,7 +834,7 @@ mod tests {
                         num_params: 0,
                     })],
                     instrs: [
-                        (Constant, [2]),
+                        (Closure, [2, 0]),
                         (Pop),
                     ]
                 }
@@ -837,7 +852,7 @@ mod tests {
                         num_params: 0,
                     })],
                     instrs: [
-                        (Constant, [0]),
+                        (Closure, [0, 0]),
                         (Pop),
                     ]
                 }
@@ -861,7 +876,7 @@ mod tests {
                         num_params: 0,
                     })],
                     instrs: [
-                        (Constant, [0]),
+                        (Closure, [0, 0]),
                         (Call, [0]),
                         (Pop),
                     ]
@@ -881,7 +896,7 @@ mod tests {
                         num_params: 0,
                     })],
                     instrs: [
-                        (Constant, [0]),
+                        (Closure, [0, 0]),
                         (SetGlobal, [0]),
                         (GetGlobal, [0]),
                         (Call, [0]),
@@ -906,7 +921,7 @@ mod tests {
                         num_params: 2,
                     }), Object::Int(1), Object::Int(2)],
                     instrs: [
-                        (Constant, [0]),
+                        (Closure, [0, 0]),
                         (SetGlobal, [0]),
                         (GetGlobal, [0]),
                         (Constant, [1]),
@@ -938,7 +953,7 @@ mod tests {
                     instrs: [
                         (Constant, [0]),
                         (SetGlobal, [0]),
-                        (Constant, [1]),
+                        (Closure, [1, 0]),
                         (Pop),
                     ]
                 }
@@ -959,7 +974,7 @@ mod tests {
                         num_params: 0,
                     })],
                     instrs: [
-                        (Constant, [1]),
+                        (Closure, [1, 0]),
                         (Pop),
                     ]
                 }
@@ -984,6 +999,124 @@ mod tests {
                         (Array, [0]),
                         (Constant, [0]),
                         (Call, [2]),
+                        (Pop),
+                    ]
+                }
+            ],
+        );
+    }
+
+    #[test]
+    fn closures() {
+        compiler_tests!(
+            [
+                "fn(a) { fn(b) { a + b } }",
+                {
+                    constants: [
+                        Object::Function(Function {
+                            instrs: make_instrs!(
+                                (GetFree, [0]),
+                                (GetLocal, [0]),
+                                (Add),
+                                (RetVal),
+                            ),
+                            num_locals: 1,
+                            num_params: 1,
+                        }),
+                        Object::Function(Function {
+                            instrs: make_instrs!(
+                                (GetLocal, [0]),
+                                (Closure, [0, 1]),
+                                (RetVal),
+                            ),
+                            num_locals: 1,
+                            num_params: 1,
+                        }),
+                    ],
+                    instrs: [
+                        (Closure, [1, 0]),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "fn(a) { fn(b) { fn(c) { a + b + c } } }",
+                {
+                    constants: [
+                        Object::Function(Function {
+                            instrs: make_instrs!(
+                                (GetFree, [0]),
+                                (GetFree, [1]),
+                                (Add),
+                                (GetLocal, [0]),
+                                (Add),
+                                (RetVal),
+                            ),
+                            num_locals: 1,
+                            num_params: 1,
+                        }),
+                        Object::Function(Function {
+                            instrs: make_instrs!(
+                                (GetFree, [0]),
+                                (GetLocal, [0]),
+                                (Closure, [0, 2]),
+                                (RetVal),
+                            ),
+                            num_locals: 1,
+                            num_params: 1,
+                        }),
+                        Object::Function(Function {
+                            instrs: make_instrs!(
+                                (GetLocal, [0]),
+                                (Closure, [1, 1]),
+                                (RetVal),
+                            ),
+                            num_locals: 1,
+                            num_params: 1,
+                        }),
+                    ],
+                    instrs: [
+                        (Closure, [2, 0]),
+                        (Pop),
+                    ]
+                }
+            ],
+            [
+                "let wrapper = fn() { let countDown = fn(x) { countDown(x - 1) }; countDown(1) }; wrapper()",
+                {
+                    constants: [
+                        Object::Int(1),
+                        Object::Function(Function {
+                            instrs: make_instrs!(
+                                (CurrentClosure),
+                                (GetLocal, [0]),
+                                (Constant, [0]),
+                                (Sub),
+                                (Call, [1]),
+                                (RetVal),
+                            ),
+                            num_locals: 2,
+                            num_params: 1,
+                        }),
+                        Object::Int(1),
+                        Object::Function(Function {
+                            instrs: make_instrs!(
+                                (Closure, [1, 0]),
+                                (SetLocal, [0]),
+                                (GetLocal, [0]),
+                                (Constant, [2]),
+                                (Call, [1]),
+                                (RetVal),
+                            ),
+                            num_locals: 2,
+                            num_params: 0,
+                        }),
+                    ],
+                    instrs: [
+                        (Closure, [3, 0]),
+                        (SetGlobal, [0]),
+                        (GetGlobal, [0]),
+                        (Call, [0]),
                         (Pop),
                     ]
                 }

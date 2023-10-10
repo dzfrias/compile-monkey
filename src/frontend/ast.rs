@@ -59,6 +59,7 @@ pub enum Expr {
     /// A function of the form: `fn(<param1>, ..., <paramN>) { <block> }`.
     /// Functions are first class
     Function {
+        name: Option<String>,
         params: Vec<Identifier>,
         body: Block,
     },
@@ -112,7 +113,7 @@ impl fmt::Display for Expr {
                     write!(f, "if {condition} {{ {consequence} }}")
                 }
             }
-            Expr::Function { params, body } => {
+            Expr::Function { params, body, .. } => {
                 let joined = params
                     .iter()
                     .map(|ident| ident.to_string() + ", ")
